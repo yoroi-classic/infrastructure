@@ -1,0 +1,67 @@
+name: run-terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      arguments:
+        description: Terraform operation
+        type: choice
+        required: true
+        default: plan
+        options:
+          - plan
+          - apply
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./terraform
+
+jobs:
+  terraform:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install SOPS
+        uses: mdgreenwald/mozilla-sops-action@d9714e521cbaecdae64a89d2fdd576dd2aa97056 # v1.6.0
+        with:
+          version: 3.11.0
+      - name: Decrypt config.yaml
+        working-directory: .
+        run: |
+          umask 077
+          sops --decrypt --output-type json config.yaml > "$RUNNER_TEMP/config.json"
+          jq '.terraform.backend' "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/backend.json"
+          sops --decrypt --in-place config.yaml
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - run: terraform init -input=false -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.json"
+      - run: terraform plan -input=false -out="$RUNNER_TEMP/terraform.tfplan"
+      - run: terraform show -no-color "$RUNNER_TEMP/terraform.tfplan"
+      - name: Apply saved plan
+        if: inputs.arguments == 'apply'
+        run: terraform apply -input=false "$RUNNER_TEMP/terraform.tfplan"
+      - name: Verify no remaining changes
+        if: inputs.arguments == 'apply'
+        run: terraform plan -input=false -detailed-exitcode -no-color
+      - name: Remove decrypted configuration and plan
+        if: always()
+        working-directory: .
+        run: |
+          git restore -- config.yaml
+          rm -f -- "$RUNNER_TEMP/config.json" "$RUNNER_TEMP/backend.json" "$RUNNER_TEMP/terraform.tfplan"

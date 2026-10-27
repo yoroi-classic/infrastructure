@@ -1,0 +1,5 @@
+creation_rules:
+  - path_regex: ^config\.yaml$
+    encrypted_regex: ^(auth|secret)$
+    # Set the MorrowWallet age public recipients before encrypting config.yaml.
+    age: ""
