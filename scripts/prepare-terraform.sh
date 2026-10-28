@@ -6,12 +6,12 @@ umask 077
 sops --decrypt --output-type json config.yaml > "$RUNNER_TEMP/config.json"
 jq -e '
   .terraform.enabled == true and
-  (.cloudflare.account_id | test("^[a-fA-F0-9]{32}$")) and
+  (.cloudflare.account_id | test("^[a-fA-F0-9]{32}\\z")) and
   (.cloudflare.zones | length == 1) and
   .cloudflare.zones[0].name == "morrowwallet.com" and
-  (.cloudflare.zones[0].zone_id | test("^[a-fA-F0-9]{32}$")) and
-  (.terraform.backend.endpoints.s3 | test("^https://[a-fA-F0-9]{32}([.](eu|fedramp))?[.]r2[.]cloudflarestorage[.]com$")) and
-  (.terraform.backend.bucket | test("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")) and
+  (.cloudflare.zones[0].zone_id | test("^[a-fA-F0-9]{32}\\z")) and
+  (.terraform.backend.endpoints.s3 | test("^https://[a-fA-F0-9]{32}([.](eu|fedramp))?[.]r2[.]cloudflarestorage[.]com\\z")) and
+  (.terraform.backend.bucket | test("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\\z")) and
   (.terraform.backend.key | endswith(".tfstate")) and
   (.terraform.bootstrap.key | endswith(".tfstate")) and
   .terraform.backend.key != .terraform.bootstrap.key and

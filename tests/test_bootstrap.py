@@ -15,17 +15,20 @@ import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 case = os.environ["BOOTSTRAP_CASE"]
+if name == "terraform":
+    backend = pathlib.Path("terraform/bootstrap/backend.tf")
+    args.append("backend_exists=" + str(backend.exists()).lower())
 with open(os.environ["COMMAND_LOG"], "a") as log:
     log.write(json.dumps([name, *args]) + "\\n")
 if name == "aws":
-    if case == "remote":
+    if case in ("remote", "remote_replace"):
         sys.exit(0)
     print("An error occurred (403)" if case == "denied" else "An error occurred (404)", file=sys.stderr)
     sys.exit(1)
 if name == "curl":
     print("200" if case == "recover" else "404", end="")
 if name == "terraform" and "show" in args:
-    print(json.dumps({"resource_changes": [{"change": {"actions": ["delete", "create"] if case == "replace" else ["create"]}}]}))
+    print(json.dumps({"resource_changes": [{"change": {"actions": ["delete", "create"] if case in ("replace", "remote_replace") else ["create"]}}]}))
 '''
 
 
@@ -57,6 +60,7 @@ class Bootstrap(unittest.TestCase):
         apply = next(i for i, cmd in enumerate(commands) if 'apply' in cmd)
         migration = next(i for i, cmd in enumerate(commands) if '-migrate-state' in cmd)
         self.assertLess(apply, migration)
+        self.assertIn('backend_exists=true', commands[migration])
         self.assertFalse(any('import' in cmd for cmd in commands))
 
     def test_existing_remote_state_never_uses_local_bootstrap(self):
@@ -73,6 +77,7 @@ class Bootstrap(unittest.TestCase):
         migration = next(i for i, cmd in enumerate(commands) if '-migrate-state' in cmd)
         self.assertLess(adoption, apply)
         self.assertLess(apply, migration)
+        self.assertIn('backend_exists=true', commands[migration])
 
     def test_denied_state_access_stops_before_terraform(self):
         result, commands = self.run_case('denied')
@@ -83,6 +88,11 @@ class Bootstrap(unittest.TestCase):
         result, commands = self.run_case('replace')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any('apply' in cmd or '-migrate-state' in cmd for cmd in commands))
+
+    def test_remote_bucket_replacement_is_rejected_before_apply(self):
+        result, commands = self.run_case('remote_replace')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any('apply' in cmd for cmd in commands))
 
 
 if __name__ == '__main__':
