@@ -11,9 +11,9 @@ The `test-terraform` and `run-terraform` workflows follow
 [Blink Labs infrastructure](https://github.com/blinklabs-io/infrastructure).
 Terraform is pinned to 1.14.6; both roots lock the Cloudflare provider and pin
 Blink Labs modules to immutable commits. Module-scoped release commits contain
-the module at the repository root. The zone pin currently includes the Free-plan
-fix in [terraform-modules#88](https://github.com/blinklabs-io/terraform-modules/pull/88);
-it uses the `cloudflare_zone` subdirectory of that immutable source commit.
+the module at the repository root. The zone module uses
+[`cloudflare_zone/v0.1.2`](https://github.com/blinklabs-io/terraform-modules/tree/cloudflare_zone/v0.1.2),
+which excludes paid Enhanced HTTP/2 Prioritization on Free zones.
 
 - `test-terraform` performs credential-free formatting, initialization,
   validation, and script checks on pull requests. It receives no deployment secrets.

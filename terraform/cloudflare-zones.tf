@@ -1,5 +1,6 @@
 module "cloudflare_zones" {
-  source   = "git::https://github.com/blinklabs-io/terraform-modules.git//cloudflare_zone?ref=eea3064e2a77cb0797843dce29d7cbeaa309ba70"
+  # cloudflare_zone/v0.1.2
+  source   = "git::https://github.com/blinklabs-io/terraform-modules.git?ref=90a75cfeb21d2cddd6c30d8ff50ef45911b56550"
   for_each = local.zones
 
   depends_on = [terraform_data.configuration]
