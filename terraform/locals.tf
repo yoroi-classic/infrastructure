@@ -10,7 +10,7 @@ locals {
     txt   = { for record in local.zones["morrowwallet.com"].txt_records : record.name => record.id if try(record.id, "") != "" }
   }
 
-  # Match the settings managed by cloudflare_zone/v0.1.1 for initial adoption.
+  # Match the settings managed by the pinned zone module for initial adoption.
   zone_setting_ids = toset(concat([
     "always_use_https",
     "automatic_https_rewrites",
@@ -18,7 +18,6 @@ locals {
     "browser_cache_ttl",
     "cache_level",
     "early_hints",
-    "h2_prioritization",
     "http3",
     "min_tls_version",
     "opportunistic_encryption",
@@ -26,5 +25,5 @@ locals {
     "ssl",
     "tls_1_3",
     "websockets",
-  ], local.zones["morrowwallet.com"].plan == "free" ? [] : ["mirage", "webp"]))
+  ], local.zones["morrowwallet.com"].plan == "free" ? [] : ["h2_prioritization", "mirage", "webp"]))
 }

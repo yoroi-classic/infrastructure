@@ -1,4 +1,11 @@
 terraform:
+  # Enable only after completing the protected GitHub environments and MorrowWallet configuration.
+  enabled: false
+  bootstrap:
+    key: bootstrap.tfstate
+    location: null
+    jurisdiction: default
+    storage_class: Standard
   backend:
     bucket: morrowwallet-terraform-state
     key: morrowwallet.tfstate

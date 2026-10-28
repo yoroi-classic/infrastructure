@@ -9,3 +9,9 @@ crash.*.log
 *.agekey
 keys.txt
 .DS_Store
+
+# Configuration uses config.yaml exclusively; ignore accidental variable files.
+*.tfvars
+*.tfvars.json
+/terraform/bootstrap/backend.tf
+__pycache__/

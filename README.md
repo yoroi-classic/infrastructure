@@ -1,99 +1,104 @@
 # MorrowWallet infrastructure
 
-Terraform configuration for the existing `morrowwallet.com` Cloudflare zone.
-Related to [clanker#34](https://github.com/yoroi-classic/clanker/issues/34).
-
-This follows the `test-terraform` and `run-terraform` GitHub Actions workflows
-in [Blink Labs infrastructure](https://github.com/blinklabs-io/infrastructure).
-Configuration lives in `config.yaml`, SOPS uses age recipients from
-`.sops.yaml`, and deployment credentials come from GitHub Actions secrets.
-All accounts, state storage, credentials, and age recipients belong to MorrowWallet.
+Terraform for the existing `morrowwallet.com` Cloudflare zone and its private R2
+state bucket. Configuration lives in `config.yaml`; SOPS uses MorrowWallet age
+recipients in `.sops.yaml`. All accounts, keys, buckets, and recipients belong
+to MorrowWallet. Related: [clanker#34](https://github.com/yoroi-classic/clanker/issues/34).
 
 ## Terraform and CI
 
-Terraform 1.14.6 is recorded in `.terraform-version`. The Cloudflare provider
-is locked in `terraform/.terraform.lock.hcl`. The zone module is pinned to
-[`cloudflare_zone/v0.1.1`](https://github.com/blinklabs-io/terraform-modules/tree/cloudflare_zone/v0.1.1);
-that release contains the module at the repository root.
+The `test-terraform` and `run-terraform` workflows follow
+[Blink Labs infrastructure](https://github.com/blinklabs-io/infrastructure).
+Terraform is pinned to 1.14.6; both roots lock the Cloudflare provider and pin
+Blink Labs modules to immutable commits. Module-scoped release commits contain
+the module at the repository root. The zone pin currently includes the Free-plan
+fix in [terraform-modules#88](https://github.com/blinklabs-io/terraform-modules/pull/88);
+it uses the `cloudflare_zone` subdirectory of that immutable source commit.
 
-- `test-terraform`: validates configuration and runs a live plan for pull
-  requests from this repository or a manual workflow dispatch. Fork pull
-  requests receive static validation without deployment credentials.
-- `run-terraform`: manually dispatched on `main` with `arguments` set to
-  `plan` or `apply`. It initializes remote state, saves and shows a plan, and
-  applies that saved plan only when `apply` was selected. It then checks for drift.
+- `test-terraform` performs credential-free formatting, initialization,
+  validation, and script checks on pull requests. It receives no deployment secrets.
+- `run-terraform` runs manually on `main`, after deployment is enabled in
+  `config.yaml`. Choose `bootstrap`, `plan`, or `apply`. A shared concurrency
+  group serializes all operations without cancelling an active run.
+- `bootstrap` uses the separate `terraform-bootstrap` environment. It creates
+  the bucket with local state, then migrates its own state into that bucket,
+  following [demeter-run/up](https://github.com/demeter-run/up/blob/main/bin/bootstrap-cloud).
+- `plan` and `apply` use the `terraform` environment and the application state
+  key. Apply creates, displays, and applies a fresh saved plan, then checks for drift.
 
-Both live jobs install SOPS, decrypt configuration using `SOPS_AGE_KEY`,
-derive backend configuration from `config.yaml`, and initialize Terraform with
-the R2 credentials supplied by GitHub. Applications and configuration are
-reviewed through pull requests; Terraform deployment runs in CI.
+Live Terraform operations run in GitHub Actions. There is no apply on push.
 
-The first live run needs the account configuration, encrypted config, backend
-bucket, and GitHub secrets described below.
+## Protected GitHub environments and credentials
 
-## GitHub repository secrets
+Before adding any credentials, protect `main`: require pull requests, human
+approval, and the Terraform validation check, and restrict direct pushes.
+Create **Settings → Environments → terraform-bootstrap** and **terraform**.
+Give each environment a deployment branch policy allowing only `main` and
+required human reviewers. Store credentials as **environment secrets** only;
+remove any copies from repository or organization secrets available to this repo.
+The environment policy provides the credential boundary independently of the
+workflow's ref guard.
 
-In this repository's **Settings → Secrets and variables → Actions**, add:
+Create these secrets in each environment:
 
-| Secret | Value and scope |
-| --- | --- |
-| `SOPS_AGE_KEY` | age private identity authorized by the public recipient in `.sops.yaml` |
-| `CLOUDFLARE_API_TOKEN` | MorrowWallet API token: Zone → Zone → Read; Zone → Zone Settings → Edit; Zone → DNS → Edit. Scope all three to `morrowwallet.com` only. |
-| `AWS_ACCESS_KEY_ID` | MorrowWallet R2 S3-compatible access key ID |
-| `AWS_SECRET_ACCESS_KEY` | Matching R2 secret access key; Object Read & Write scoped only to the private state bucket |
+| Secret | `terraform-bootstrap` | `terraform` |
+| --- | --- | --- |
+| `SOPS_AGE_KEY` | Private age identity authorized in `.sops.yaml` | Same authorization requirement |
+| `CLOUDFLARE_API_TOKEN` | Account → Workers R2 Storage → Edit, scoped to the MorrowWallet account | Zone → Zone → Read; Zone → Zone Settings → Edit; Zone → DNS → Edit, scoped only to `morrowwallet.com` |
+| `AWS_ACCESS_KEY_ID` | R2 Object Read & Write access key; temporarily allow all buckets if the dashboard cannot scope it to the not-yet-created bucket | R2 Object Read & Write access key scoped only to the state bucket |
+| `AWS_SECRET_ACCESS_KEY` | Matching R2 secret | Matching bucket-scoped R2 secret |
 
-Use the R2 dashboard to create the bucket-scoped Object Read & Write token.
-These credentials are for R2, not an AWS account. A Global API Key is not
-required. See Cloudflare's [R2 credentials](https://developers.cloudflare.com/r2/api/tokens/),
+Enable R2 in the MorrowWallet account, but **do not create the bucket manually**.
+Create the bootstrap R2 credentials before running bootstrap. After the bucket
+exists, rotate the bootstrap R2 credentials to bucket-scoped Object Read & Write
+and revoke the temporary account-wide token. Retain the account-scoped Cloudflare
+R2 management token only in `terraform-bootstrap` for bucket maintenance.
+The AWS-named secrets are Cloudflare R2 credentials; no AWS account or Global
+API Key is required.
+
+References: [R2 credentials](https://developers.cloudflare.com/r2/api/tokens/),
+[bucket API permissions](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/methods/create/),
 [zone settings permissions](https://developers.cloudflare.com/api/resources/zones/subresources/settings/methods/edit/),
 and [DNS permissions](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/).
 
-Deployment tokens and age private keys are stored in GitHub secrets, never
-committed to `config.yaml` or posted in issues.
-
 ## Complete config.yaml and SOPS
 
-Enable R2 in the MorrowWallet account and create a private state bucket as an
-account-setup prerequisite, following the [R2 backend guide](https://developers.cloudflare.com/terraform/advanced-topics/remote-backend/).
-The state bucket is outside this root so application changes cannot delete
-their own backend. Keep access restricted and arrange protected state backups.
+Keep `terraform.enabled: false` until configuration and protected environments
+are ready. Static validation works with the initial public template.
 
-Set the following values in `config.yaml`:
+Set these values in `config.yaml`:
 
-- `cloudflare.account_id`: MorrowWallet's account ID.
-- `cloudflare.zones[0].zone_id`: the existing `morrowwallet.com` zone ID.
-  Keep IDs quoted as strings.
-- `cloudflare.zones[0].plan`: confirm the existing Free-plan assumption.
-- `terraform.backend.bucket`: the private state bucket.
-- `terraform.backend.endpoints.s3`: normally
-  `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`; use the jurisdiction-specific
-  endpoint if the bucket requires one.
-- `terraform.backend.key`: a state key unique to this root; the default is
-  `morrowwallet.tfstate`. Keep `use_lockfile` enabled.
+- `cloudflare.account_id` and `cloudflare.zones[0].zone_id`: the MorrowWallet
+  account and existing zone IDs, quoted as strings. Only `morrowwallet.com` is supported.
+- `cloudflare.zones[0].plan`: the existing zone's actual plan.
+- `terraform.backend.bucket`: the private state bucket name to create.
+- `terraform.backend.endpoints.s3`: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`,
+  or the corresponding `.eu`/`.fedramp` endpoint for that jurisdiction.
+- `terraform.backend.key` and `terraform.bootstrap.key`: different `.tfstate`
+  keys in the same bucket. Defaults are `morrowwallet.tfstate` and `bootstrap.tfstate`.
+- `terraform.bootstrap.location`, `jurisdiction`, and `storage_class`: bucket
+  settings. Defaults are automatic location, `default` jurisdiction, and `Standard`.
+  Keep `use_lockfile` enabled for both roots.
 
-Set the MorrowWallet operators' and CI public age recipients in `.sops.yaml`.
-Encrypt the template before committing configuration:
+Set MorrowWallet operators' and CI public age recipients in `.sops.yaml`.
+Encrypt configuration before committing it:
 
 ```sh
 sops --encrypt --in-place config.yaml
 sops config.yaml
 ```
 
-The SOPS rule follows Blink Labs' `auth`/`secret` field convention.
-Infrastructure values remain readable for Terraform validation. There are no
-secret-valued config fields initially; SOPS still protects the file's
-integrity. Once encrypted, make every edit through SOPS to keep its MAC valid.
-Keep the matching private CI identity only in `SOPS_AGE_KEY`.
+Use SOPS for every subsequent edit, including enabling deployment. The rule
+follows Blink Labs' `auth`/`secret` convention. Infrastructure settings remain
+readable for credential-free validation; SOPS metadata authenticates the file.
+Private identities and API tokens belong only in the environment secrets.
 
 ## Existing DNS and zone settings
 
-Inventory existing DNS records and settings before the first CI plan. Imports
-adopt the existing zone and every setting managed by the pinned module. Empty
-DNS lists leave existing records unmanaged.
-
-To adopt a DNS record, add its current values and Cloudflare `id` together in
-the appropriate list in `config.yaml`. Omit `id` only for a genuinely new
-record. For example:
+Inventory existing DNS before the first application plan. Imports adopt the
+zone and all settings managed by the module. Empty DNS lists leave existing
+records unmanaged. To adopt a record, add its current values and Cloudflare `id`
+together. Omit `id` only for a new record. For example:
 
 ```yaml
 cname_records:
@@ -104,35 +109,38 @@ cname_records:
     proxied: false
 ```
 
-Use the actual target and proxy setting. A/CNAME entries require `name`,
-`record_name`, and `content`; `proxied` defaults to true. TXT entries require
-`name`, `record_name`, and `content`. MX entries require `value` and integer
-`priority` and apply at the apex. Future Kubernetes ingress targets belong to
-the deployment work.
+A/CNAME entries require `name`, `record_name`, and `content`; `proxied` defaults
+to true. TXT entries require `name`, `record_name`, and `content`. MX entries
+require `value` and integer `priority`, and apply at the apex.
 
 The module enforces strict TLS, TLS 1.2 minimum, HTTPS redirects, HTTP/3,
-caching settings, Rocket Loader, TLS 1.3 zero-RTT, and one-year HSTS with
-preload and subdomains. HSTS affects every subdomain and outlives a Terraform
-rollback. Proxied DNS TTLs become automatic; other TTLs become 60 seconds.
-Review these changes before applying. The module does not configure request
-logging or wallet API cache bypass rules.
+caching, Rocket Loader, TLS 1.3 zero-RTT, and one-year HSTS with preload and
+subdomains. HSTS affects every subdomain and outlives a rollback. Proxied DNS
+TTLs become automatic; other TTLs become 60 seconds. Review these changes before
+applying. Wallet API cache bypass and request logging are separate deployment work.
 
-## First deployment through GitHub Actions
+## First deployment and bootstrap recovery
 
-After the Terraform PR and completed configuration are merged:
+After configuration is reviewed and merged, use **Actions → run-terraform →
+Run workflow**, select `main`, and choose `bootstrap`. Approve the protected
+environment deployment. The job creates the bucket, disables its public
+`r2.dev` endpoint, migrates bootstrap state into R2, and checks for drift.
+No custom domain is created for the bucket.
 
-1. Open **Actions → run-terraform → Run workflow**, select `main`, choose
-   `plan`, and run it.
-2. Review the plan in the job log. The existing zone must be imported, not
-   recreated or replaced. Review all deletions, DNS targets, TTL/proxy changes,
-   and zone-setting changes.
-3. Run the same workflow on `main` with `apply`. The job generates and shows
-   a fresh saved plan and applies it.
-4. Confirm the drift-check step exits 0 and verify affected DNS/HTTPS behavior.
+Bootstrap checks the remote bootstrap key first. If it exists, the job uses
+remote state directly. If the bucket exists without that key after an interrupted
+run, the job imports the bucket into temporary local state and retries migration.
+Only confirmed missing bucket/key responses permit this recovery; authorization
+and network failures stop the run. Bootstrap rejects any plan containing deletion
+or replacement. Local state and temporary plans are removed from the runner.
+Do not change bucket, jurisdiction, or state keys as a routine configuration edit;
+those changes require a separately reviewed state migration. Keep protected state backups.
 
-There is no automatic apply on push. To roll back, revert configuration through
-a PR, review the CI plan, and dispatch `run-terraform` with `apply`. Do not
-destroy the imported domain as a rollback.
+After bootstrap, narrow its R2 credentials as described above. Dispatch `plan`,
+review zone imports and every setting/DNS change in the log, then dispatch
+`apply`. Confirm the drift check exits 0 and verify DNS/HTTPS behavior.
+To roll back, revert configuration through a PR and use the same CI plan/apply
+process. Do not destroy the imported domain or state bucket as a rollback.
 
 ## Static validation
 
@@ -142,8 +150,13 @@ These checks need no credentials or remote state:
 terraform fmt -check -recursive -diff
 terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
 terraform -chdir=terraform validate -no-color
+terraform -chdir=terraform/bootstrap init -backend=false -input=false -lockfile=readonly
+terraform -chdir=terraform/bootstrap validate -no-color
+shellcheck scripts/*.sh
+python3 -m unittest discover -s tests
 actionlint .github/workflows/test-terraform.yml .github/workflows/run-terraform.yml
 ```
 
-State, saved plans, and `.terraform/` are ignored by Git. Live plans and
-deployment must use CI with the configured remote backend and state locking.
+State, saved plans, and `.terraform/` are ignored. `backend.tf.example` declares
+the bootstrap backend; CI creates `backend.tf` only after the local apply.
+All backend values come from `config.yaml`.

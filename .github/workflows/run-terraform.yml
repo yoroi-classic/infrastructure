@@ -4,31 +4,50 @@ on:
   workflow_dispatch:
     inputs:
       arguments:
-        description: Terraform operation
+        description: Terraform operation (bootstrap creates the private state bucket and migrates its state)
         type: choice
         required: true
         default: plan
         options:
           - plan
           - apply
+          - bootstrap
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-    working-directory: ./terraform
+concurrency:
+  group: morrowwallet-terraform
+  cancel-in-progress: false
 
 jobs:
-  terraform:
+  configuration:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.configuration.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check deployment configuration
+        id: configuration
+        run: |
+          enabled=$(python3 -c 'import yaml; print(str(yaml.safe_load(open("config.yaml"))["terraform"]["enabled"] is True).lower())')
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [[ "$enabled" != true ]]; then
+            echo 'Deployment disabled in config.yaml; complete infrastructure#1 before enabling.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  terraform:
+    needs: configuration
+    if: needs.configuration.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    # Secrets must exist only in environments with main-only deployment policies
+    # and required human reviewers, never in repository/organization secrets.
+    environment: ${{ inputs.arguments == 'bootstrap' && 'terraform-bootstrap' || 'terraform' }}
     env:
       TF_IN_AUTOMATION: "true"
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -37,31 +56,42 @@ jobs:
         uses: mdgreenwald/mozilla-sops-action@d9714e521cbaecdae64a89d2fdd576dd2aa97056 # v1.6.0
         with:
           version: 3.11.0
-      - name: Decrypt config.yaml
-        working-directory: .
-        run: |
-          umask 077
-          sops --decrypt --output-type json config.yaml > "$RUNNER_TEMP/config.json"
-          jq '.terraform.backend' "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/backend.json"
-          sops --decrypt --in-place config.yaml
+      - name: Prepare configuration
+        run: bash scripts/prepare-terraform.sh
         env:
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: 1.14.6
           terraform_wrapper: false
-      - run: terraform init -input=false -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.json"
-      - run: terraform plan -input=false -out="$RUNNER_TEMP/terraform.tfplan"
-      - run: terraform show -no-color "$RUNNER_TEMP/terraform.tfplan"
-      - name: Apply saved plan
-        if: inputs.arguments == 'apply'
-        run: terraform apply -input=false "$RUNNER_TEMP/terraform.tfplan"
-      - name: Verify no remaining changes
-        if: inputs.arguments == 'apply'
-        run: terraform plan -input=false -detailed-exitcode -no-color
-      - name: Remove decrypted configuration and plan
+      - name: Bootstrap private Terraform state
+        if: inputs.arguments == 'bootstrap'
+        run: bash scripts/bootstrap-terraform.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Plan and optionally apply
+        if: inputs.arguments != 'bootstrap'
+        working-directory: terraform
+        run: |
+          terraform init -input=false -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.json"
+          terraform plan -input=false -out="$RUNNER_TEMP/terraform.tfplan"
+          terraform show -no-color "$RUNNER_TEMP/terraform.tfplan"
+          if [[ "$OPERATION" == apply ]]; then
+            terraform apply -input=false "$RUNNER_TEMP/terraform.tfplan"
+            terraform plan -input=false -detailed-exitcode -no-color
+          fi
+        env:
+          OPERATION: ${{ inputs.arguments }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Remove decrypted configuration and temporary state
         if: always()
-        working-directory: .
         run: |
           git restore -- config.yaml
-          rm -f -- "$RUNNER_TEMP/config.json" "$RUNNER_TEMP/backend.json" "$RUNNER_TEMP/terraform.tfplan"
+          rm -f -- terraform/bootstrap/backend.tf terraform/bootstrap/terraform.tfstate terraform/bootstrap/terraform.tfstate.backup
+          rm -f -- "$RUNNER_TEMP/config.json" "$RUNNER_TEMP/backend.json" "$RUNNER_TEMP/bootstrap-backend.json" \
+            "$RUNNER_TEMP/terraform.tfplan" "$RUNNER_TEMP/bootstrap.tfplan" "$RUNNER_TEMP/state-head-error" "$RUNNER_TEMP/bucket.json"
