@@ -26,9 +26,11 @@ if name == "aws":
     print("An error occurred (403)" if case == "denied" else "An error occurred (404)", file=sys.stderr)
     sys.exit(1)
 if name == "curl":
-    print("200" if case == "recover" else "404", end="")
+    print("200" if case == "recover" else "403" if case == "bucket_denied" else "404", end="")
 if name == "terraform" and "show" in args:
     print(json.dumps({"resource_changes": [{"change": {"actions": ["delete", "create"] if case in ("replace", "remote_replace") else ["create"]}}]}))
+if name == "terraform" and "plan" in args and "-detailed-exitcode" in args and case == "drift":
+    sys.exit(2)
 '''
 
 
@@ -67,7 +69,9 @@ class Bootstrap(unittest.TestCase):
         result, commands = self.run_case('remote')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(cmd[0] == 'curl' or 'import' in cmd or '-migrate-state' in cmd for cmd in commands))
-        self.assertTrue(any('init' in cmd and any(arg.startswith('-backend-config=') for arg in cmd) for cmd in commands))
+        remote_init = next(cmd for cmd in commands if 'init' in cmd)
+        self.assertIn('backend_exists=true', remote_init)
+        self.assertTrue(any(arg.startswith('-backend-config=') for arg in remote_init))
 
     def test_interrupted_bootstrap_imports_before_apply_and_migration(self):
         result, commands = self.run_case('recover')
@@ -93,6 +97,16 @@ class Bootstrap(unittest.TestCase):
         result, commands = self.run_case('remote_replace')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any('apply' in cmd for cmd in commands))
+
+    def test_bucket_api_denial_stops_before_plan_or_apply(self):
+        result, commands = self.run_case('bucket_denied')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any('plan' in cmd or 'apply' in cmd for cmd in commands))
+
+    def test_drift_plan_exit_two_fails_bootstrap(self):
+        result, commands = self.run_case('drift')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(any('plan' in cmd and '-detailed-exitcode' in cmd for cmd in commands))
 
 
 if __name__ == '__main__':

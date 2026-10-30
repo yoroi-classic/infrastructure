@@ -3,6 +3,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -47,6 +48,78 @@ class Prepare(unittest.TestCase):
     def test_equal_state_keys_rejected(self):
         config = copy.deepcopy(CONFIG)
         config['terraform']['bootstrap']['key'] = config['terraform']['backend']['key']
+        result, backends = self.run_config(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(backends, {})
+
+    def test_second_zone_is_rejected(self):
+        config = copy.deepcopy(CONFIG)
+        config['cloudflare']['zones'].append({'name': 'other.example', 'zone_id': '2' * 32})
+        result, backends = self.run_config(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(backends, {})
+
+    def test_terraform_configuration_precondition_rejects_second_zone(self):
+        terraform = shutil.which('terraform')
+        if terraform is None:
+            self.skipTest('terraform is installed in the CI validation job')
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            terraform_root = root / 'terraform'
+            terraform_root.mkdir()
+            for source in (REPO / 'terraform').glob('*.tf'):
+                if source.name != 'backend.tf':
+                    shutil.copy(source, terraform_root / source.name)
+            shutil.copy(REPO / 'terraform/.terraform.lock.hcl', terraform_root)
+            cache = terraform_root / '.terraform'
+            cache.mkdir()
+            source_cache = REPO / 'terraform/.terraform'
+            for name in ('modules', 'providers'):
+                source = source_cache / name
+                if source.exists():
+                    (cache / name).symlink_to(source, target_is_directory=True)
+
+            config = copy.deepcopy(CONFIG)
+            config['cloudflare']['zones'].append({
+                'name': 'other.example', 'zone_id': '2' * 32, 'plan': 'free',
+                'a_records': [], 'cname_records': [], 'mx_records': [], 'txt_records': [],
+            })
+            (root / 'config.yaml').write_text(json.dumps(config))
+
+            init = subprocess.run(
+                [terraform, f'-chdir={terraform_root}', 'init', '-backend=false',
+                 '-input=false', '-lockfile=readonly'],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(init.returncode, 0, init.stderr)
+            plan = subprocess.run(
+                [terraform, f'-chdir={terraform_root}', 'plan', '-input=false',
+                 '-refresh=false', '-target=terraform_data.configuration'],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(plan.returncode, 0, plan.stdout + plan.stderr)
+            self.assertIn('Only the existing morrowwallet.com zone is supported', plan.stderr)
+
+    def test_endpoint_for_another_account_is_rejected(self):
+        config = copy.deepcopy(CONFIG)
+        config['terraform']['backend']['endpoints']['s3'] = (
+            'https://' + '1' * 32 + '.r2.cloudflarestorage.com'
+        )
+        result, backends = self.run_config(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(backends, {})
+
+    def test_eu_jurisdiction_rejects_the_default_endpoint(self):
+        config = copy.deepcopy(CONFIG)
+        config['terraform']['bootstrap']['jurisdiction'] = 'eu'
+        result, backends = self.run_config(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(backends, {})
+
+    def test_disabling_lockfile_is_rejected(self):
+        config = copy.deepcopy(CONFIG)
+        config['terraform']['backend']['use_lockfile'] = False
         result, backends = self.run_config(config)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(backends, {})
