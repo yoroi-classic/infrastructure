@@ -101,6 +101,11 @@ class Bootstrap(unittest.TestCase):
     def test_bucket_api_denial_stops_before_plan_or_apply(self):
         result, commands = self.run_case('bucket_denied')
         self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(any(
+            cmd[0] == 'curl' and
+            'https://api.cloudflare.com/client/v4/accounts/00000000000000000000000000000000/r2/buckets/test-state' in cmd
+            for cmd in commands
+        ))
         self.assertFalse(any('plan' in cmd or 'apply' in cmd for cmd in commands))
 
     def test_drift_plan_exit_two_fails_bootstrap(self):
