@@ -81,6 +81,11 @@ class Prepare(unittest.TestCase):
                     (cache / name).symlink_to(source, target_is_directory=True)
 
             config = copy.deepcopy(CONFIG)
+            for zone in config['cloudflare']['zones']:
+                zone.update({
+                    'plan': 'free', 'a_records': [], 'cname_records': [],
+                    'mx_records': [], 'txt_records': [],
+                })
             config['cloudflare']['zones'].append({
                 'name': 'other.example', 'zone_id': '2' * 32, 'plan': 'free',
                 'a_records': [], 'cname_records': [], 'mx_records': [], 'txt_records': [],
