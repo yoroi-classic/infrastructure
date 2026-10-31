@@ -18,6 +18,13 @@ case = os.environ["BOOTSTRAP_CASE"]
 if name == "terraform":
     backend = pathlib.Path("terraform/bootstrap/backend.tf")
     args.append("backend_exists=" + str(backend.exists()).lower())
+    backend_config = next((arg.split("=", 1)[1] for arg in args if arg.startswith("-backend-config=")), None)
+    backend_key = None
+    if backend_config is not None:
+        config_path = pathlib.Path(backend_config)
+        if config_path.exists():
+            backend_key = json.loads(config_path.read_text()).get("key")
+    args.append("backend_key=" + str(backend_key))
 with open(os.environ["COMMAND_LOG"], "a") as log:
     log.write(json.dumps([name, *args]) + "\\n")
 if name == "aws":
@@ -40,6 +47,8 @@ class Bootstrap(unittest.TestCase):
             root = Path(directory)
             (root / 'terraform/bootstrap').mkdir(parents=True)
             shutil.copy(REPO / 'terraform/bootstrap/backend.tf.example', root / 'terraform/bootstrap')
+            (root / 'bootstrap-backend.json').write_text(json.dumps({'key': 'bootstrap.tfstate'}))
+            (root / 'backend.json').write_text(json.dumps({'key': 'application.tfstate'}))
             (root / 'bin').mkdir()
             for name in ('aws', 'curl', 'terraform'):
                 command = root / 'bin' / name
@@ -63,6 +72,7 @@ class Bootstrap(unittest.TestCase):
         migration = next(i for i, cmd in enumerate(commands) if '-migrate-state' in cmd)
         self.assertLess(apply, migration)
         self.assertIn('backend_exists=true', commands[migration])
+        self.assertIn('backend_key=bootstrap.tfstate', commands[migration])
         self.assertFalse(any('import' in cmd for cmd in commands))
 
     def test_existing_remote_state_never_uses_local_bootstrap(self):
@@ -72,6 +82,7 @@ class Bootstrap(unittest.TestCase):
         remote_init = next(cmd for cmd in commands if 'init' in cmd)
         self.assertIn('backend_exists=true', remote_init)
         self.assertTrue(any(arg.startswith('-backend-config=') for arg in remote_init))
+        self.assertIn('backend_key=bootstrap.tfstate', remote_init)
 
     def test_interrupted_bootstrap_imports_before_apply_and_migration(self):
         result, commands = self.run_case('recover')
@@ -82,6 +93,7 @@ class Bootstrap(unittest.TestCase):
         self.assertLess(adoption, apply)
         self.assertLess(apply, migration)
         self.assertIn('backend_exists=true', commands[migration])
+        self.assertIn('backend_key=bootstrap.tfstate', commands[migration])
 
     def test_denied_state_access_stops_before_terraform(self):
         result, commands = self.run_case('denied')
