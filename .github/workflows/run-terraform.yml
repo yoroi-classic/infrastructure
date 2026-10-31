@@ -75,14 +75,7 @@ jobs:
       - name: Plan and optionally apply
         if: inputs.arguments != 'bootstrap'
         working-directory: terraform
-        run: |
-          terraform init -input=false -lockfile=readonly -backend-config="$RUNNER_TEMP/backend.json"
-          terraform plan -input=false -out="$RUNNER_TEMP/terraform.tfplan"
-          terraform show -no-color "$RUNNER_TEMP/terraform.tfplan"
-          if [[ "$OPERATION" == apply ]]; then
-            terraform apply -input=false "$RUNNER_TEMP/terraform.tfplan"
-            terraform plan -input=false -detailed-exitcode -no-color
-          fi
+        run: bash ../scripts/run-terraform.sh
         env:
           OPERATION: ${{ inputs.arguments }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
