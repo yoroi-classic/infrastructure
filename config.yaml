@@ -1,0 +1,32 @@
+terraform:
+  # Enable only after completing the protected GitHub environments and MorrowWallet configuration.
+  enabled: false
+  bootstrap:
+    key: bootstrap.tfstate
+    location: null
+    jurisdiction: default
+    storage_class: Standard
+  backend:
+    bucket: morrowwallet-terraform-state
+    key: morrowwallet.tfstate
+    endpoints:
+      s3: ""
+    region: auto
+    use_lockfile: true
+    skip_credentials_validation: true
+    skip_region_validation: true
+    skip_requesting_account_id: true
+    skip_metadata_api_check: true
+    skip_s3_checksum: true
+
+cloudflare:
+  account_id: "REPLACE_WITH_MORROWWALLET_ACCOUNT_ID"
+  zones:
+    - name: morrowwallet.com
+      zone_id: "REPLACE_WITH_EXISTING_MORROWWALLET_ZONE_ID"
+      plan: free
+      # Populate only after the existing DNS records and their IDs are inventoried.
+      a_records: []
+      cname_records: []
+      mx_records: []
+      txt_records: []
