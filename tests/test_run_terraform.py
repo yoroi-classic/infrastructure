@@ -40,6 +40,8 @@ class RunTerraform(unittest.TestCase):
                        RUNNER_TEMP=str(root), OPERATION=operation, COMMAND_LOG=str(log))
             if drift:
                 env['DRIFT'] = '1'
+            else:
+                env['DRIFT'] = '0'
             result = subprocess.run(['bash', str(SCRIPT)], cwd=REPO / 'terraform', env=env,
                                     capture_output=True, text=True)
             commands = [json.loads(line) for line in log.read_text().splitlines()]
@@ -63,10 +65,13 @@ class RunTerraform(unittest.TestCase):
         result, commands = self.run_operation('apply', drift=True)
         self.assertEqual(result.returncode, 2, result.stderr)
         drift_plans = [
-            command for command in commands
+            index for index, command in enumerate(commands)
             if command['args'][0] == 'plan' and '-detailed-exitcode' in command['args']
         ]
         self.assertEqual(len(drift_plans), 1)
+        apply_index = next(index for index, command in enumerate(commands)
+                           if command['args'][0] == 'apply')
+        self.assertGreater(drift_plans[0], apply_index)
 
 
 if __name__ == '__main__':
