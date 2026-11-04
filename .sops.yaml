@@ -1,5 +1,8 @@
 creation_rules:
   - path_regex: ^config\.yaml$
     encrypted_regex: ^(auth|secret)$
-    # Set the MorrowWallet age public recipients before encrypting config.yaml.
-    age: ""
+    # MorrowWallet recipients: GitHub Actions CI, Adam Dean, Chris Gianelloni.
+    age: >-
+      age1llm02km8cktwq5jt5v34mvcwe0l6n7vukepgweseyu9pjgakq5qqvsslsl,
+      age1zf5p460w5leqy7pq9nlaa5akatlfmcp23yunwgged9nt9ftjappq2fjlrk,
+      age135tvpa7yc8wuuhd68awg248nhel02sw4pdmptjfx68w3u8l8kalspkwjnr

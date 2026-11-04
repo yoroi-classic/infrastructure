@@ -1,32 +1,64 @@
 terraform:
-  # Enable only after completing the protected GitHub environments and MorrowWallet configuration.
-  enabled: false
-  bootstrap:
-    key: bootstrap.tfstate
-    location: null
-    jurisdiction: default
-    storage_class: Standard
-  backend:
-    bucket: morrowwallet-terraform-state
-    key: morrowwallet.tfstate
-    endpoints:
-      s3: ""
-    region: auto
-    use_lockfile: true
-    skip_credentials_validation: true
-    skip_region_validation: true
-    skip_requesting_account_id: true
-    skip_metadata_api_check: true
-    skip_s3_checksum: true
-
+    # Enable only after completing the protected GitHub environments and MorrowWallet configuration.
+    enabled: false
+    bootstrap:
+        key: bootstrap.tfstate
+        location: null
+        jurisdiction: default
+        storage_class: Standard
+    backend:
+        bucket: morrowwallet-terraform-state
+        key: morrowwallet.tfstate
+        endpoints:
+            s3: https://fb41a448905f9e10db59e0665f27e0ee.r2.cloudflarestorage.com
+        region: auto
+        use_lockfile: true
+        skip_credentials_validation: true
+        skip_region_validation: true
+        skip_requesting_account_id: true
+        skip_metadata_api_check: true
+        skip_s3_checksum: true
 cloudflare:
-  account_id: "REPLACE_WITH_MORROWWALLET_ACCOUNT_ID"
-  zones:
-    - name: morrowwallet.com
-      zone_id: "REPLACE_WITH_EXISTING_MORROWWALLET_ZONE_ID"
-      plan: free
-      # Populate only after the existing DNS records and their IDs are inventoried.
-      a_records: []
-      cname_records: []
-      mx_records: []
-      txt_records: []
+    account_id: fb41a448905f9e10db59e0665f27e0ee
+    zones:
+        - name: morrowwallet.com
+          zone_id: 34d83c655f7bd8dd6458e13697e2e536
+          plan: free
+          # No DNS records exist yet; empty lists leave any later records unmanaged.
+          a_records: []
+          cname_records: []
+          mx_records: []
+          txt_records: []
+sops:
+    age:
+        - recipient: age1llm02km8cktwq5jt5v34mvcwe0l6n7vukepgweseyu9pjgakq5qqvsslsl
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBlMVlRRTR0SmFjbWdkYW9z
+            MURCNGRORGFndWJyMnFOV09sMks2VTJjaUUwClFUcDdsVGY1bHFPL08wMG5FaEty
+            Qk9OYzhjNitkZVpYQ3ozbERyZjJQeVEKLS0tIGxNT203ZEVvMDIxNU5JVDZPWVZM
+            eEtsVkJ4Nk4yaHlMTmFCc2JUaUkxNlkKc4V+8rYs82bw9+L8l4iJiUTOSJZVFneL
+            RkrZbweAMxL/KWIZ455DIKvVdoyeHxfDy/RFhZnC3phB8DKA0aZElw==
+            -----END AGE ENCRYPTED FILE-----
+        - recipient: age1zf5p460w5leqy7pq9nlaa5akatlfmcp23yunwgged9nt9ftjappq2fjlrk
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBqQjRid3RIczcySWhCNFA1
+            bXJVRFFUTUh1Q3NLcEtqSUNXdjdKTGFhWkNnClpqZU9GTktEUHg5dzBIYS9XYjJW
+            MmdQM0ZvaWhucUFyWmttT0Z5cktrM1kKLS0tIFhPRytQbENocDdoTElJMkJsMmZ4
+            ek1iNnpNTUlIeGRaN3d5cG43VmwyRncKAFCfldw/T40EjOShjYb906zQWfF0MeVC
+            kN+2QSVtK3Jz1jJ7sfOqimZW9Q5+SieEcsICIXqaQubnl0sAvOpVGA==
+            -----END AGE ENCRYPTED FILE-----
+        - recipient: age135tvpa7yc8wuuhd68awg248nhel02sw4pdmptjfx68w3u8l8kalspkwjnr
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAzVkRtWWxSSk1oM2NlOXhK
+            V0JaQTNrZDZxN1AvR2pvL0tiZ29QbW9ONHlBCmhpN294Qk9yd1lBS1ZpTXRQTjJu
+            TEdoVUpEZ0xyZ0cyT0ZSZ0NmRDk3S1kKLS0tIE0rcW1UeGhQQ0JyeDJuTTlkYzNu
+            YlQvOFlRTHY2cU9EaW1obHhsNEQzY3MKXmWk3htE6xCa6g2/YNmn8gjtKq7w0m6e
+            ApHVbo6x6IFp1ZYpnRTzZSR9XhpzMemo6FfnLDXj4TOwm27JCL643g==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-11-04T15:27:00Z"
+    mac: ENC[AES256_GCM,data:hXKBP2LX85QnU87EiQlGjndqCkclDFKNKPY3c3y1fFaWXvQ6erihMWIrzHMl+iHw8u/A9t+/Y3OMpcatof/zytyPG/q3La5nrAmBHIWbHtD2C1x/VFgs8dOwdakd8a28V6uwZucZiURfdQfdxMlVbuCCSnnweh58X/0O231upsY=,iv:xRu+/qdy5RrAPdJF+XlSgtIzIEbXLtDzJ9X6toGJCCk=,tag:8RMGh9plJf1Tj5rFglJInA==,type:str]
+    encrypted_regex: ^(auth|secret)$
+    version: 3.11.0
