@@ -1,6 +1,6 @@
 terraform:
     # Enable only after completing the protected GitHub environments and MorrowWallet configuration.
-    enabled: false
+    enabled: true
     bootstrap:
         key: bootstrap.tfstate
         location: null
@@ -58,7 +58,7 @@ sops:
             YlQvOFlRTHY2cU9EaW1obHhsNEQzY3MKXmWk3htE6xCa6g2/YNmn8gjtKq7w0m6e
             ApHVbo6x6IFp1ZYpnRTzZSR9XhpzMemo6FfnLDXj4TOwm27JCL643g==
             -----END AGE ENCRYPTED FILE-----
-    lastmodified: "2026-11-04T15:27:00Z"
-    mac: ENC[AES256_GCM,data:hXKBP2LX85QnU87EiQlGjndqCkclDFKNKPY3c3y1fFaWXvQ6erihMWIrzHMl+iHw8u/A9t+/Y3OMpcatof/zytyPG/q3La5nrAmBHIWbHtD2C1x/VFgs8dOwdakd8a28V6uwZucZiURfdQfdxMlVbuCCSnnweh58X/0O231upsY=,iv:xRu+/qdy5RrAPdJF+XlSgtIzIEbXLtDzJ9X6toGJCCk=,tag:8RMGh9plJf1Tj5rFglJInA==,type:str]
+    lastmodified: "2026-11-04T15:31:49Z"
+    mac: ENC[AES256_GCM,data:XPASkwPlRi+KeJkUpGQKwk83vOBTMh29n83LDmrmpoKfwNJILNsjKYDTU+EINzEoDIkCin2oVPlX6O/nw4vUODEMGKAg2KjlL5tuPyqeWGXZM6jfMgQFubHv+tFck+2gf029VdK0ELosAiK9MT2JAC+e9cDyS/YJ+HmfCVfNC60=,iv:5kP18Vsz2aGxMfpBjaIdLm5kcXrFS70tBT0yCWkZuBA=,tag:Lkgx/ZjsrwlK10US7gEOOA==,type:str]
     encrypted_regex: ^(auth|secret)$
     version: 3.11.0
