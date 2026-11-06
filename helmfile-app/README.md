@@ -27,7 +27,8 @@ Configure both packages as public for anonymous pulls. If private packages are
 required, configure chart authentication and namespace image-pull Secrets
 before deployment; this initial setup assumes public packages.
 
-PR CI renders against the exact chart source commit recorded in
+PR validation runs on every pull request to `main`, so required checks are not
+skipped by path filters. It renders against the exact chart source commit recorded in
 `pr-helmfile.yml`, using the readable deployment settings in `config.yaml`, or the public example
 when those settings have not been added yet. It never decrypts production
 configuration or accesses the shared cluster. Update that source pin together

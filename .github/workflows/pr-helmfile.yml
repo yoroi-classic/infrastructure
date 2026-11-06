@@ -4,11 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - config.yaml
-      - helmfile-app/**
-      - scripts/*helmfile*
-      - .github/workflows/*helmfile.yml
 
 permissions:
   contents: read
