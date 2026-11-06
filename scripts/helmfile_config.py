@@ -72,3 +72,23 @@ def write_github_env(config, path):
     with Path(path).open("a") as output:
         for key, value in values.items():
             output.write(key + "=" + value + "\n")
+
+
+def validate_gateway(pods):
+    """Require an explicit environment override with the standard Kong entrypoint.
+
+    Kubernetes explicit env overrides envFrom, and Kong env overrides kong.conf.
+    Reject envFrom/custom entrypoints here rather than read shared credentials or
+    accept an unverified startup configuration.
+    """
+    require(bool(pods.get("items")), "No Kong gateway pods matched")
+    for pod in pods["items"]:
+        containers = [c for c in pod["spec"]["containers"] if c["name"] == "proxy"]
+        require(len(containers) == 1, "Expected the Kong chart's proxy container")
+        proxy = containers[0]
+        require(re.fullmatch(r"(?:(?:docker.io/)?library/)?kong(?::[A-Za-z0-9_.-]+|@sha256:[0-9a-f]{64})", proxy["image"]), "Use the standard official Kong image for the verified entrypoint")
+        require(not proxy.get("command") and not proxy.get("args"), "Custom Kong entrypoints require review before deployment")
+        require(not proxy.get("envFrom"), "Unverified Kong envFrom configuration is unsupported")
+        trusted = [e for e in proxy.get("env", []) if e["name"] == "KONG_TRUSTED_IPS"]
+        require(len(trusted) == 1 and trusted[0].get("value") == "127.0.0.1,::1" and "valueFrom" not in trusted[0],
+                "Set gateway.env.trusted_ips explicitly to 127.0.0.1,::1 through Blink Labs infrastructure")

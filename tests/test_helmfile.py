@@ -1,5 +1,6 @@
 """Deployment guard and public-endpoint regression tests; no cluster credentials."""
 import importlib.util
+import copy
 import json
 import io
 from pathlib import Path
@@ -130,6 +131,28 @@ class DeploymentGuards(unittest.TestCase):
             self.assertFalse(path.exists())
             write_github_env(ready(), path)
             self.assertIn("GKE_CONTEXT=bl-demeter\n", path.read_text())
+
+
+class GatewayPrerequisites(unittest.TestCase):
+    def test_explicit_override_and_rejection_of_unverified_sources(self):
+        proxy = {"name": "proxy", "image": "kong:3.9", "env": [
+            {"name": "KONG_TRUSTED_IPS", "value": "127.0.0.1,::1"}]}
+        def check(container):
+            pods = {"items": [{"spec": {"containers": [container]}}]}
+            return subprocess.run([sys.executable, str(ROOT / "scripts/check-kong.py")],
+                                  input=json.dumps(pods), capture_output=True, text=True)
+        self.assertEqual(check(proxy).returncode, 0)
+        for change in ({"env": []},
+                       {"env": [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
+                       {"env": [{"name": "KONG_TRUSTED_IPS", "valueFrom": {"secretKeyRef": {"name": "test-only", "key": "trusted"}}}]},
+                       {"envFrom": [{"configMapRef": {"name": "test-only"}}]},
+                       {"command": ["sh", "-c", "kong start"]},
+                       {"args": ["--conf", "/custom.conf"]},
+                       {"image": "example.invalid/custom-kong:latest"}):
+            with self.subTest(change=change):
+                candidate = copy.deepcopy(proxy)
+                candidate.update(change)
+                self.assertNotEqual(check(candidate).returncode, 0)
 
 
 class EndpointVerification(unittest.TestCase):

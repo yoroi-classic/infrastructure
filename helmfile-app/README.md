@@ -29,7 +29,12 @@ CI requires the Kong proxy LoadBalancer Service to use
 a node's rate-limit bucket. Set `kong.proxyService` to the actual proxy Service.
 If the shared service needs changing, do so through the Blink Labs infrastructure
 review/apply workflow before deploying this application. Confirm Kong's trusted-IP
-configuration and NetworkPolicy enforcement as part of setup. See
+configuration and NetworkPolicy enforcement as part of setup. Set
+`gateway.env.trusted_ips: "127.0.0.1,::1"` in the shared Kong Helm values so a
+concrete environment value overrides any config file. CI requires this literal
+override on every matched gateway, the official Kong image and default entrypoint,
+and rejects `envFrom`/custom entrypoints rather than reading shared credentials.
+Review other custom Kong/nginx settings before enabling this application. See
 [the Kong source-IP guide](https://developer.konghq.com/kubernetes-ingress-controller/preserve-client-ip/).
 Review [backend #229](https://github.com/yoroi-classic/cardano-wallet-backend/issues/229)
 before scaling beyond one backend replica.
