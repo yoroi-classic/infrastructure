@@ -51,7 +51,7 @@ releases:
           network: {{ $network | quote }}
           provider: {{ $app.provider | quote }}
           port: {{ $.Values.helmfile.backendPort }}
-          trustProxy: ""
+          trustProxy: single-hop
         secrets:
           existingSecret: {{ $app.existingSecret | quote }}
         resources:

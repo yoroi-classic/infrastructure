@@ -70,10 +70,16 @@ jobs:
         run: |
           kubectl --context "$GKE_CONTEXT" get ingressclass kong
           kubectl --context "$GKE_CONTEXT" get crd issuers.cert-manager.io
-          kubectl --context "$GKE_CONTEXT" --namespace kong get services -o json |
-            jq -e '[.items[] | select(.spec.type == "LoadBalancer") |
-              {name: .metadata.name, addresses: [.status.loadBalancer.ingress[]? | select((.ip // "") != "" or (.hostname // "") != "")]}] |
-              map(select(.addresses | length > 0)) | if length > 0 then . else error("Kong has no assigned load-balancer address") end'
+          kubectl --context "$GKE_CONTEXT" --namespace kong get service "$KONG_PROXY_SERVICE" -o json |
+            jq -e 'if .spec.type != "LoadBalancer" or .spec.externalTrafficPolicy != "Local" then
+              error("Kong proxy must preserve client addresses: LoadBalancer with externalTrafficPolicy Local required")
+              else {name: .metadata.name, addresses: [.status.loadBalancer.ingress[]? |
+              select((.ip // "") != "" or (.hostname // "") != "")]} |
+              if (.addresses | length) > 0 then . else error("Kong has no assigned load-balancer address") end end'
+          kubectl --context "$GKE_CONTEXT" --namespace kong get pods -l "$KONG_POD_SELECTOR" -o json |
+            jq -e 'all(.items[].spec.containers[]; all(.env[]?;
+              .name != "KONG_TRUSTED_IPS" or .value == "")) |
+              if . then true else error("Kong must not trust client forwarding headers; review trusted-IP configuration") end'
           count=$(kubectl --context "$GKE_CONTEXT" --namespace kong get pods -l "$KONG_POD_SELECTOR" -o 'go-template={{len .items}}')
           test "$count" -gt 0
           kubectl --context "$GKE_CONTEXT" --namespace kong wait pods -l "$KONG_POD_SELECTOR" --for=condition=Ready --timeout=60s

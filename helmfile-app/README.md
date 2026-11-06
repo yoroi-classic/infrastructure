@@ -17,11 +17,22 @@ labels; CI requires matching ready pods. The cluster must enforce NetworkPolicie
 `backendPort` sets both the application port and the policy port (3010 for the
 pinned chart).
 
-The backend ignores forwarded client-IP headers, keeping the chart's secure
-proxy-trust default. Rate limits therefore share buckets per Kong socket peer.
+The backend uses explicit `single-hop` proxy trust: only Kong's appended client
+address owns the rate-limit bucket; earlier client-supplied entries are ignored,
+even for private client addresses. This requires the published image to include
+single-hop support from backend PR #262. NetworkPolicy enforcement must restrict
+all backend ingress to the selected gateway pods. Kong must append the real
+client address and must not trust arbitrary incoming forwarding headers.
+
+CI requires the Kong proxy LoadBalancer Service to use
+`externalTrafficPolicy: Local`, preserving client addresses rather than sharing
+a node's rate-limit bucket. Set `kong.proxyService` to the actual proxy Service.
+If the shared service needs changing, do so through the Blink Labs infrastructure
+review/apply workflow before deploying this application. Confirm Kong's trusted-IP
+configuration and NetworkPolicy enforcement as part of setup. See
+[the Kong source-IP guide](https://developer.konghq.com/kubernetes-ingress-controller/preserve-client-ip/).
 Review [backend #229](https://github.com/yoroi-classic/cardano-wallet-backend/issues/229)
-before enabling client-specific proxy trust or scaling; forwarded headers must
-not allow clients to choose their own rate-limit identity.
+before scaling beyond one backend replica.
 
 ## Artifacts
 
@@ -65,7 +76,8 @@ Provision these namespaces and the identity's access using the existing Blink
 Labs infrastructure workflow. This Helmfile does not create namespaces or
 require cluster-admin. It also reads the `kong` IngressClass, the cert-manager
 Issuer CRD, and Services/Pods in the `kong` namespace for prerequisite checks and
-load-balancer address discovery; grant those specific read permissions.
+load-balancer address discovery. Grant `get`/`list` on those Services and
+`get`/`list`/`watch` on those Pods, since readiness checks use `kubectl wait`.
 
 Confirm that the shared Kong access-log configuration preserves wallet privacy:
 request paths and query strings can contain wallet addresses. This application
@@ -91,7 +103,8 @@ sops --decrypt config.yaml > /dev/null
 ```
 
 Before running the helper, fill the GKE project and ACME contact email, replace
-the zero image tag with a successfully published commit tag, and confirm the
+the zero image tag with a successfully published commit tag, set the real
+`kong.proxyService` name and gateway pod selector, and confirm the
 proposed hostnames `api.morrowwallet.com` and `api-preprod.morrowwallet.com`.
 Keep the chart and image pins explicit. Set `helmfile.enabled: true` only after
 the protected environment, packages, namespaces, and cluster permissions are

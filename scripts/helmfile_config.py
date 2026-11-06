@@ -22,7 +22,8 @@ def validate(config, complete=False, require_enabled=False, authenticated_projec
         require(set(config["deployments"]) == {"mainnet", "preprod"}, "Configure mainnet and preprod")
         require(config["kong"]["namespace"] == "kong", "Use the shared Kong namespace")
         require(config["kong"]["ingressClass"] == "kong", "Use the shared Kong ingress class")
-        require("trustedCidrs" not in config["kong"], "Forwarded-IP trust is disabled; remove trustedCidrs")
+        require("trustedCidrs" not in config["kong"], "Use single-hop trust; remove trustedCidrs")
+        require(DNS_LABEL.fullmatch(config["kong"]["proxyService"]), "Set the Kong proxy Service name")
         labels = config["kong"]["podSelector"]
         require(isinstance(labels, dict) and bool(labels), "Set the Kong gateway pod selector")
         for key, value in labels.items():
@@ -52,17 +53,19 @@ def validate(config, complete=False, require_enabled=False, authenticated_projec
         if require_enabled:
             require(config["enabled"] is True, "Enable Helmfile only after setup is complete")
         if complete:
+            require(config["kong"]["proxyService"] != "replace-with-kong-proxy-service", "Set the actual Kong proxy Service name")
             require(config["image"]["tag"] != "sha-" + "0" * 40, "Set a published image commit tag")
             require(re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", cluster["project"]), "Set the GKE project")
             require(re.fullmatch(r"[^@\s]+@[^@\s]+[.][^@\s]+", config["acme"]["email"]), "Set the ACME contact email")
         if authenticated_project is not None:
             require(bool(authenticated_project) and cluster["project"] == authenticated_project, "The configured project must match the authenticated deployment identity")
     except (KeyError, TypeError) as error:
-        raise ValueError("Missing or malformed Helmfile configuration") from error
+        raise ValueError("Missing or malformed Helmfile configuration: " + str(error)) from error
 
 
 def write_github_env(config, path):
     values = {"GKE_" + key.upper(): config["cluster"][key] for key in ("project", "name", "location", "context")}
+    values["KONG_PROXY_SERVICE"] = config["kong"]["proxyService"]
     values["KONG_POD_SELECTOR"] = ",".join(key + "=" + value for key, value in sorted(config["kong"]["podSelector"].items()))
     for value in values.values():
         require(isinstance(value, str) and "\n" not in value and "\r" not in value, "Invalid cluster setting")

@@ -4,6 +4,7 @@ import json
 import io
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -22,6 +23,7 @@ spec.loader.exec_module(verify)
 def ready():
     config = yaml.safe_load((ROOT / "helmfile-app/config.yaml.example").read_text())["helmfile"]
     config["enabled"] = True
+    config["kong"]["proxyService"] = "kong-gateway-proxy"
     config["cluster"]["project"] = "test-deployment-project"
     config["acme"]["email"] = "ops@example.invalid"
     config["image"]["tag"] = "sha-" + "1" * 40
@@ -39,6 +41,12 @@ class DeploymentGuards(unittest.TestCase):
 
     def test_reject_unsafe_targets_and_settings(self):
         changes = [
+            (("enabled",), False),
+            (("deployments",), {"mainnet": {}}),
+            (("kong", "namespace"), "default"),
+            (("kong", "ingressClass"), "traefik"),
+            (("kong", "proxyService"), "replace-with-kong-proxy-service"),
+            (("chart", "version"), ">=0.1.0"),
             (("cluster", "context"), "default"),
             (("cluster", "name"), "another-cluster"),
             (("cluster", "location"), "us-east1"),
@@ -55,9 +63,11 @@ class DeploymentGuards(unittest.TestCase):
             (("backendPort",), True),
             (("deployments", "mainnet", "namespace"), "kong"),
             (("deployments", "mainnet", "hostname"), "api-preprod.morrowwallet.com"),
+            (("deployments", "mainnet", "hostname"), "api.dmtr.demeter.run"),
             (("deployments", "mainnet", "hostname"), "-api.morrowwallet.com"),
             (("deployments", "mainnet", "hostname"), "a" * 64 + ".morrowwallet.com"),
             (("deployments", "mainnet", "replicas"), True),
+            (("deployments", "mainnet", "replicas"), 3),
             (("deployments", "mainnet", "provider"), "unknown"),
             (("deployments", "mainnet", "provider"), "blockfrost"),
         ]
@@ -68,8 +78,40 @@ class DeploymentGuards(unittest.TestCase):
                 for key in path[:-1]:
                     target = target[key]
                 target[path[-1]] = value
-                with self.assertRaises(ValueError):
-                    validate(config, complete=True, require_enabled=True)
+                result = self.run_cli(config)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def run_cli(self, config, *options):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.yaml"
+            path.write_text(yaml.safe_dump({"helmfile": config}))
+            return subprocess.run([sys.executable, str(ROOT / "scripts/check-helmfile-config.py"),
+                                   "--deploy", "--config", str(path), *options],
+                                  capture_output=True, text=True)
+
+    def test_cli_exports_and_identity_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = Path(directory) / "github-env"
+            result = self.run_cli(ready(), "--github-env", str(env), "--authenticated-project", "test-deployment-project")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("GKE_CONTEXT=bl-demeter\n", env.read_text())
+            self.assertIn("KONG_PROXY_SERVICE=kong-gateway-proxy\n", env.read_text())
+            result = self.run_cli(ready(), "--authenticated-project", "another-project")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("authenticated deployment identity", result.stderr)
+        config = ready()
+        del config["chart"]["version"]
+        result = self.run_cli(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("version", result.stderr)
+
+    def test_identity_check_precedes_cluster_credentials(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
+        steps = workflow["jobs"]["helmfile"]["steps"]
+        binding = next(i for i, step in enumerate(steps) if "--authenticated-project" in step.get("run", ""))
+        credentials = next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("google-github-actions/get-gke-credentials@"))
+        self.assertLess(binding, credentials)
+        self.assertIn("${{ steps.auth.outputs.project_id }}", steps[binding]["env"]["AUTHENTICATED_PROJECT"])
 
     def test_authenticated_project_binding(self):
         config = ready()

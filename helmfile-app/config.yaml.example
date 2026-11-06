@@ -16,6 +16,8 @@ helmfile:
   kong:
     namespace: kong
     ingressClass: kong
+    # Replace with the actual shared Kong proxy Service before enabling.
+    proxyService: replace-with-kong-proxy-service
     # Confirm these labels against the existing Kong gateway pods.
     podSelector:
       app.kubernetes.io/name: gateway
