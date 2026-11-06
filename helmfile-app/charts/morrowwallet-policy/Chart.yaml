@@ -1,0 +1,5 @@
+apiVersion: v2
+name: morrowwallet-policy
+description: Namespace-local certificate issuer and backend ingress isolation
+version: 0.1.0
+type: application

@@ -1,0 +1,61 @@
+name: pr-helmfile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check out the pinned chart source for credential-free rendering
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: yoroi-classic/cardano-wallet-backend
+          ref: 0527ef6b55dc489a9a96f0b11477c69c57167bc3
+          path: backend-source
+          persist-credentials: false
+      - name: Prepare public rendering configuration
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import sys
+          sys.path.insert(0, "scripts")
+          from helmfile_config import validate
+          from pathlib import Path
+          import yaml
+          current = yaml.safe_load(Path("config.yaml").read_text())
+          example = yaml.safe_load(Path("helmfile-app/config.yaml.example").read_text())
+          data = {"helmfile": current.get("helmfile") or example["helmfile"]}
+          validate(data["helmfile"])
+          chart = Path("backend-source/charts/cardano-wallet-backend").resolve()
+          chart_meta = yaml.safe_load((chart / "Chart.yaml").read_text())
+          if chart_meta["version"] != data["helmfile"]["chart"]["version"]:
+              raise SystemExit("Update the pinned chart checkout together with the chart version")
+          data["helmfile"]["chart"]["source"] = str(chart)
+          data["helmfile"]["acme"]["email"] = "render@example.invalid"
+          target = Path(os.environ["RUNNER_TEMP"]) / "helmfile-render.yaml"
+          target.write_text(yaml.safe_dump(data))
+          PYTHON
+          python3 -m unittest discover -s tests -p "test_helmfile.py"
+          python3 -m py_compile scripts/*helmfile*.py
+      - name: Lint and render Helmfile
+        uses: helmfile/helmfile-action@712000e3d4e28c72778ecc53857746082f555ef3 # v2.0.4
+        with:
+          helmfile-version: v1.1.5
+          helm-version: v3.17.3
+          helm-plugins: ''
+          helmfile-auto-init: 'false'
+          helmfile-workdirectory: helmfile-app
+          helmfile-args: '-e bl-demeter --state-values-file ${{ runner.temp }}/helmfile-render.yaml lint'
+      - name: Render both networks
+        run: |
+          helmfile -f helmfile-app/helmfile.yaml.gotmpl -e bl-demeter \
+            --state-values-file "$RUNNER_TEMP/helmfile-render.yaml" template > "$RUNNER_TEMP/rendered.yaml"
