@@ -1,0 +1,19 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: morrowwallet-acme
+spec:
+  acme:
+    email: {{ required "acmeEmail is required" .Values.acmeEmail | quote }}
+    server: {{ .Values.acmeServer | quote }}
+    privateKeySecretRef:
+      name: morrowwallet-acme-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.ingressClass | quote }}
+            ingressTemplate:
+              metadata:
+                annotations:
+                  external-dns.alpha.kubernetes.io/controller: ignore
+                  external-dns.kubernetes.io/controller: ignore

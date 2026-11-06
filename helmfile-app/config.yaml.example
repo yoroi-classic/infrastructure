@@ -1,0 +1,42 @@
+helmfile:
+  enabled: false
+  cluster:
+    project: REPLACE_WITH_GCP_PROJECT
+    name: dmtr-cluster
+    location: us-central1
+    context: bl-demeter
+  chart:
+    source: oci://ghcr.io/yoroi-classic/charts/cardano-wallet-backend
+    version: 0.1.3
+  image:
+    repository: ghcr.io/yoroi-classic/cardano-wallet-backend
+    # Replace with the full commit tag reported by publish-image.
+    tag: sha-0000000000000000000000000000000000000000
+  kong:
+    namespace: kong
+    ingressClass: kong
+    # The NetworkPolicy admits traffic only from the Kong namespace.
+    trustedCidrs: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  acme:
+    email: REPLACE_WITH_ACME_EMAIL
+    server: https://acme-v02.api.letsencrypt.org/directory
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  deployments:
+    mainnet:
+      namespace: morrowwallet-mainnet
+      hostname: api.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''
+    preprod:
+      namespace: morrowwallet-preprod
+      hostname: api-preprod.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''

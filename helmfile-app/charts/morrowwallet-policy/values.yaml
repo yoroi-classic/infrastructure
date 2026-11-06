@@ -1,0 +1,5 @@
+backendRelease: cardano-wallet-backend-mainnet
+kongNamespace: kong
+ingressClass: kong
+acmeEmail: ''
+acmeServer: https://acme-v02.api.letsencrypt.org/directory
