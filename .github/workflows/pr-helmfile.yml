@@ -26,11 +26,15 @@ jobs:
         run: |
           python3 - <<'PYTHON'
           import os
+          import sys
+          sys.path.insert(0, "scripts")
+          from helmfile_config import validate
           from pathlib import Path
           import yaml
           current = yaml.safe_load(Path("config.yaml").read_text())
           example = yaml.safe_load(Path("helmfile-app/config.yaml.example").read_text())
           data = {"helmfile": current.get("helmfile") or example["helmfile"]}
+          validate(data["helmfile"])
           chart = Path("backend-source/charts/cardano-wallet-backend").resolve()
           chart_meta = yaml.safe_load((chart / "Chart.yaml").read_text())
           if chart_meta["version"] != data["helmfile"]["chart"]["version"]:
@@ -40,7 +44,7 @@ jobs:
           target = Path(os.environ["RUNNER_TEMP"]) / "helmfile-render.yaml"
           target.write_text(yaml.safe_dump(data))
           PYTHON
-          python3 scripts/check-helmfile-config.py --config "$RUNNER_TEMP/helmfile-render.yaml"
+          python3 -m unittest discover -s tests -p "test_helmfile.py"
           python3 -m py_compile scripts/*helmfile*.py
       - name: Lint and render Helmfile
         uses: helmfile/helmfile-action@712000e3d4e28c72778ecc53857746082f555ef3 # v2.0.4

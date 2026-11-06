@@ -11,10 +11,17 @@ certificate through Kong, without Cloudflare credentials in Kubernetes.
 The application and ACME solver ingresses explicitly opt out of external-dns.
 
 The small `morrowwallet-policy` chart supplies the HTTP-01 Issuer and a
-NetworkPolicy admitting backend traffic only from the `kong` namespace. The
-backend trusts private proxy CIDRs behind this policy. The cluster must enforce
-NetworkPolicies. Confirm the Kong namespace, ingress class, and proxy source
-addresses before enabling deployment.
+NetworkPolicy admitting backend traffic only from the configured gateway pods
+in the `kong` namespace. Confirm `kong.podSelector` against the existing gateway
+labels; CI requires matching ready pods. The cluster must enforce NetworkPolicies.
+`backendPort` sets both the application port and the policy port (3010 for the
+pinned chart).
+
+The backend ignores forwarded client-IP headers, keeping the chart's secure
+proxy-trust default. Rate limits therefore share buckets per Kong socket peer.
+Review [backend #229](https://github.com/yoroi-classic/cardano-wallet-backend/issues/229)
+before enabling client-specific proxy trust or scaling; forwarded headers must
+not allow clients to choose their own rate-limit identity.
 
 ## Artifacts
 
@@ -46,14 +53,18 @@ Create the GitHub environment **helmfile**, restricted to deployments from
 
 Follow the existing Blink Labs GKE authentication pattern. The identity needs
 GKE cluster discovery access, plus Kubernetes permissions to manage Helm
-releases and their Deployments, Services, ServiceAccounts, Secrets, Ingresses,
+releases and their Deployments, Services, ServiceAccounts, ConfigMaps, Ingresses,
 NetworkPolicies, and cert-manager Issuers/Certificates in `morrowwallet-mainnet`
-and `morrowwallet-preprod`. Helm stores release state as namespace Secrets.
+and `morrowwallet-preprod`. CI sets `HELM_DRIVER=configmap`, so release state
+uses ConfigMaps rather than Secrets. Do not grant the deployer direct Secret
+read/write access: provider Secrets are operator-managed, and cert-manager
+manages TLS Secrets. A deployer able to change workloads remains a trusted identity.
+The configured GKE project must match the project in its service-account credentials.
 
 Provision these namespaces and the identity's access using the existing Blink
 Labs infrastructure workflow. This Helmfile does not create namespaces or
 require cluster-admin. It also reads the `kong` IngressClass, the cert-manager
-Issuer CRD, and Services in the `kong` namespace for prerequisite checks and
+Issuer CRD, and Services/Pods in the `kong` namespace for prerequisite checks and
 load-balancer address discovery; grant those specific read permissions.
 
 Confirm that the shared Kong access-log configuration preserves wallet privacy:
@@ -116,7 +127,9 @@ shared rate-limit/cache behavior before increasing replicas.
      proxied: false
    ```
 
-   For a load-balancer hostname, use CNAME records with the same names instead.
+   For a load-balancer hostname, add the entries to
+   `cloudflare.zones[0].cname_records` instead of `a_records`, using that hostname
+   as `content` and keeping the same names and `proxied: false`.
    Adopt any pre-existing records using their IDs rather than creating duplicates.
    Keep proxying disabled so public TLS terminates at Kong. No external-dns
    annotations create or update these records.
@@ -127,7 +140,9 @@ shared rate-limit/cache behavior before increasing replicas.
    the diff, and approve the protected deployment. Releases wait for readiness
    and roll back individually on Helm failure. The post-apply step waits for
    backend rollouts and certificate readiness, then verifies HTTPS health and the
-   expected network/provider with a healthy chain status. Post-deploy failure does not
+   expected network/provider with a healthy chain status. HTTPS startup and
+   transient provider errors retry for a bounded period; a network/provider mismatch
+   fails immediately. Post-deploy failure does not
    roll back an otherwise successful application release; inspect cert-manager
    status and fix DNS/issuer configuration before retrying.
 5. Run the diff again and confirm no remaining changes. Verify HTTPS `/health`

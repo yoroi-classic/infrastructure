@@ -23,6 +23,9 @@ releases:
     values:
       - backendRelease: cardano-wallet-backend-{{ $network }}
         kongNamespace: {{ $.Values.helmfile.kong.namespace | quote }}
+        backendPort: {{ $.Values.helmfile.backendPort }}
+        kongPodSelector:
+{{ $.Values.helmfile.kong.podSelector | toYaml | indent 10 }}
         ingressClass: {{ $.Values.helmfile.kong.ingressClass | quote }}
         acmeEmail: {{ $.Values.helmfile.acme.email | quote }}
         acmeServer: {{ $.Values.helmfile.acme.server | quote }}
@@ -47,8 +50,8 @@ releases:
         config:
           network: {{ $network | quote }}
           provider: {{ $app.provider | quote }}
-          logLevel: info
-          trustProxy: {{ $.Values.helmfile.kong.trustedCidrs | quote }}
+          port: {{ $.Values.helmfile.backendPort }}
+          trustProxy: ""
         secrets:
           existingSecret: {{ $app.existingSecret | quote }}
         resources:

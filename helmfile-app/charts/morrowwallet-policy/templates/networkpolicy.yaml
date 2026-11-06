@@ -5,7 +5,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/instance: {{ .Values.backendRelease | quote }}
+      app.kubernetes.io/instance: {{ required "backendRelease is required" .Values.backendRelease | quote }}
   policyTypes:
     - Ingress
   ingress:
@@ -13,6 +13,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.kongNamespace | quote }}
+          podSelector:
+            matchLabels:
+{{ required "kongPodSelector is required" .Values.kongPodSelector | toYaml | indent 14 }}
       ports:
         - protocol: TCP
-          port: 3010
+          port: {{ .Values.backendPort }}

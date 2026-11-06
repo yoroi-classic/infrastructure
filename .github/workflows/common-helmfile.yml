@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: morrowwallet-helmfile-bl-demeter
   cancel-in-progress: false
@@ -19,6 +23,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment: helmfile
     runs-on: ubuntu-latest
+    env:
+      HELM_DRIVER: configmap
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -38,27 +44,20 @@ jobs:
         run: |
           umask 077
           sops --decrypt --in-place config.yaml
-          python3 scripts/check-helmfile-config.py --deploy
-          python3 - <<'PYTHON'
-          import os
-          from pathlib import Path
-          import yaml
-          cluster = yaml.safe_load(Path("config.yaml").read_text())["helmfile"]["cluster"]
-          with open(os.environ["GITHUB_ENV"], "a") as output:
-              for key in ("project", "name", "location", "context"):
-                  value = cluster[key]
-                  if not isinstance(value, str) or "\n" in value or "\r" in value:
-                      raise SystemExit("Invalid cluster setting")
-                  output.write("GKE_" + key.upper() + "=" + value + "\n")
-          PYTHON
+          python3 scripts/check-helmfile-config.py --deploy --github-env "$GITHUB_ENV"
       - name: Install kubectl
         uses: azure/setup-kubectl@0c5e050edfed71b2b50731ab044d42489d51c129 # v4.0.0
         with:
           version: v1.32.3
       - name: GKE authentication
+        id: auth
         uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Verify the authenticated deployment project
+        env:
+          AUTHENTICATED_PROJECT: ${{ steps.auth.outputs.project_id }}
+        run: python3 scripts/check-helmfile-config.py --deploy --authenticated-project "$AUTHENTICATED_PROJECT"
       - name: Get bl-demeter credentials
         id: cluster
         uses: google-github-actions/get-gke-credentials@d0cee45012069b163a631894b98904a9e6723729 # v2.3.3
@@ -72,7 +71,12 @@ jobs:
           kubectl --context "$GKE_CONTEXT" get ingressclass kong
           kubectl --context "$GKE_CONTEXT" get crd issuers.cert-manager.io
           kubectl --context "$GKE_CONTEXT" --namespace kong get services -o json |
-            jq '[.items[] | select(.spec.type == "LoadBalancer") | {name: .metadata.name, addresses: .status.loadBalancer.ingress}]'
+            jq -e '[.items[] | select(.spec.type == "LoadBalancer") |
+              {name: .metadata.name, addresses: [.status.loadBalancer.ingress[]? | select((.ip // "") != "" or (.hostname // "") != "")]}] |
+              map(select(.addresses | length > 0)) | if length > 0 then . else error("Kong has no assigned load-balancer address") end'
+          count=$(kubectl --context "$GKE_CONTEXT" --namespace kong get pods -l "$KONG_POD_SELECTOR" -o 'go-template={{len .items}}')
+          test "$count" -gt 0
+          kubectl --context "$GKE_CONTEXT" --namespace kong wait pods -l "$KONG_POD_SELECTOR" --for=condition=Ready --timeout=60s
       - name: Run Helmfile
         uses: helmfile/helmfile-action@712000e3d4e28c72778ecc53857746082f555ef3 # v2.0.4
         with:

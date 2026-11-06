@@ -12,11 +12,14 @@ helmfile:
     repository: ghcr.io/yoroi-classic/cardano-wallet-backend
     # Replace with the full commit tag reported by publish-image.
     tag: sha-0000000000000000000000000000000000000000
+  backendPort: 3010
   kong:
     namespace: kong
     ingressClass: kong
-    # The NetworkPolicy admits traffic only from the Kong namespace.
-    trustedCidrs: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+    # Confirm these labels against the existing Kong gateway pods.
+    podSelector:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/instance: kong
   acme:
     email: REPLACE_WITH_ACME_EMAIL
     server: https://acme-v02.api.letsencrypt.org/directory

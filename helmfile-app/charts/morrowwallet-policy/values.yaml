@@ -1,4 +1,6 @@
-backendRelease: cardano-wallet-backend-mainnet
+backendRelease: ''
+backendPort: 3010
+kongPodSelector: {}
 kongNamespace: kong
 ingressClass: kong
 acmeEmail: ''

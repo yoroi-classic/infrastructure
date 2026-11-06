@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
-"""Merge deployment settings into config.yaml through SOPS on an authorized machine."""
+"""Update config.yaml through SOPS on an authorized operator machine."""
+import argparse
 import json
 from pathlib import Path
 import subprocess
-import sys
 import yaml
+from helmfile_config import validate
 
-settings = yaml.safe_load(Path(sys.argv[1]).read_text())["helmfile"]
-assignment = '["helmfile"] ' + json.dumps(settings)
-subprocess.run(["sops", "--in-place", "--set", assignment, "config.yaml"], check=True)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("settings_file")
+    args = parser.parse_args()
+    settings = yaml.safe_load(Path(args.settings_file).read_text()).get("helmfile")
+    try:
+        validate(settings, complete=True)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    subprocess.run(["sops", "set", "--value-stdin", "config.yaml", '["helmfile"]'],
+                   input=json.dumps(settings), text=True, check=True)
+
+
+if __name__ == "__main__":
+    main()
