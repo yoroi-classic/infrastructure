@@ -141,13 +141,17 @@ class GatewayPrerequisites(unittest.TestCase):
             pods = {"items": [{"spec": {"containers": [container]}}]}
             return subprocess.run([sys.executable, str(ROOT / "scripts/check-kong.py")],
                                   input=json.dumps(pods), capture_output=True, text=True)
-        self.assertEqual(check(proxy).returncode, 0)
+        for image in ("kong:3.9", "kong/kong-gateway:3.9", "docker.io/library/kong:3.9"):
+            candidate = copy.deepcopy(proxy)
+            candidate["image"] = image
+            self.assertEqual(check(candidate).returncode, 0)
         for change in ({"env": []},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "valueFrom": {"secretKeyRef": {"name": "test-only", "key": "trusted"}}}]},
                        {"envFrom": [{"configMapRef": {"name": "test-only"}}]},
                        {"command": ["sh", "-c", "kong start"]},
                        {"args": ["--conf", "/custom.conf"]},
+                       {"image": "dockerXio/library/kong:3.9"},
                        {"image": "example.invalid/custom-kong:latest"}):
             with self.subTest(change=change):
                 candidate = copy.deepcopy(proxy)

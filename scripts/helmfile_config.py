@@ -86,7 +86,7 @@ def validate_gateway(pods):
         containers = [c for c in pod["spec"]["containers"] if c["name"] == "proxy"]
         require(len(containers) == 1, "Expected the Kong chart's proxy container")
         proxy = containers[0]
-        require(re.fullmatch(r"(?:(?:docker.io/)?library/)?kong(?::[A-Za-z0-9_.-]+|@sha256:[0-9a-f]{64})", proxy["image"]), "Use the standard official Kong image for the verified entrypoint")
+        require(re.fullmatch(r"(?:docker\.io/)?(?:library/kong|kong|kong/kong-gateway)(?::[A-Za-z0-9_.-]+|@sha256:[0-9a-f]{64})", proxy["image"]), "Use the standard official Kong image for the verified entrypoint")
         require(not proxy.get("command") and not proxy.get("args"), "Custom Kong entrypoints require review before deployment")
         require(not proxy.get("envFrom"), "Unverified Kong envFrom configuration is unsupported")
         trusted = [e for e in proxy.get("env", []) if e["name"] == "KONG_TRUSTED_IPS"]
