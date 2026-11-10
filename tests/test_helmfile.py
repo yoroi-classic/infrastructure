@@ -53,9 +53,18 @@ def rendered_fixture():
                     "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kong"}},
                     "podSelector": {"matchLabels": {"app.kubernetes.io/name": "gateway", "app.kubernetes.io/instance": "kong"}}}],
                     "ports": [{"protocol": "TCP", "port": 3010}]}]}},
-            {"kind": "Ingress", "metadata": {"labels": labels.copy(), "annotations": ignore.copy()}},
+            {"kind": "Ingress", "metadata": {"labels": labels.copy(), "annotations": {**ignore,
+                "cert-manager.io/issuer": "morrowwallet-acme", "konghq.com/protocols": "https",
+                "konghq.com/https-redirect-status-code": "308", "konghq.com/strip-path": "false"}},
+             "spec": {"ingressClassName": "kong", "tls": [{"secretName": "morrowwallet-tls", "hosts": [
+                 "api.morrowwallet.com" if network == "mainnet" else "api-preprod.morrowwallet.com"]}],
+                 "rules": [{"host": "api.morrowwallet.com" if network == "mainnet" else "api-preprod.morrowwallet.com", "http": {"paths": [
+                     {"path": "/", "pathType": "Prefix", "backend": {"service": {"name": "cardano-wallet-backend", "port": {"number": 80}}}}]}}]}},
             {"kind": "Issuer", "metadata": {"name": "morrowwallet-acme"}, "spec": {"acme": {"solvers": [
-                {"http01": {"ingress": {"ingressTemplate": {"metadata": {"annotations": ignore.copy()}}}}}]}}},
+                {"http01": {"ingress": {"ingressClassName": "kong", "ingressTemplate": {"metadata": {"annotations": ignore.copy()}}}}}]}}},
+            {"kind": "Service", "metadata": {"name": "cardano-wallet-backend", "labels": labels.copy()},
+             "spec": {"type": "ClusterIP", "selector": labels.copy(),
+                      "ports": [{"port": 80, "targetPort": "http", "protocol": "TCP", "name": "http"}]}},
         ])
     return documents
 
@@ -64,7 +73,7 @@ class RenderBoundary(unittest.TestCase):
     def test_valid_boundary_and_rejected_regressions(self):
         check_render.check(ready(), rendered_fixture())
         for network in range(2):
-            start = network * 4
+            start = network * 5
             for change in ("missing-trust", "wrong-trust", "wrong-pod-labels", "wrong-policy-selector", "namespace-peer", "wrong-policy-type"):
                 with self.subTest(network=network, change=change):
                     documents = rendered_fixture()
@@ -84,8 +93,39 @@ class RenderBoundary(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         check_render.check(ready(), documents)
 
+    def test_reject_tls_routing_and_public_service_regressions(self):
+        for start in (0, 5):
+            for change in ("class", "tls", "tls-host", "protocols", "redirect", "issuer", "solver-class", "target", "public-service", "external-ip", "service-selector"):
+                with self.subTest(start=start, change=change):
+                    documents = rendered_fixture()
+                    route, service = documents[start + 2], documents[start + 4]
+                    if change == "class":
+                        route["spec"]["ingressClassName"] = "other"
+                    elif change == "tls":
+                        del route["spec"]["tls"]
+                    elif change == "tls-host":
+                        route["spec"]["tls"][0]["hosts"] = ["other.morrowwallet.com"]
+                    elif change == "protocols":
+                        route["metadata"]["annotations"]["konghq.com/protocols"] = "http"
+                    elif change == "redirect":
+                        del route["metadata"]["annotations"]["konghq.com/https-redirect-status-code"]
+                    elif change == "issuer":
+                        route["metadata"]["annotations"]["cert-manager.io/issuer"] = "other"
+                    elif change == "solver-class":
+                        documents[start + 3]["spec"]["acme"]["solvers"][0]["http01"]["ingress"]["ingressClassName"] = "other"
+                    elif change == "target":
+                        route["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]["name"] = "other"
+                    elif change == "public-service":
+                        service["spec"]["type"] = "LoadBalancer"
+                    elif change == "external-ip":
+                        service["spec"]["externalIPs"] = ["192.0.2.1"]
+                    else:
+                        service["spec"]["selector"]["app.kubernetes.io/instance"] = "other"
+                    with self.assertRaises(ValueError):
+                        check_render.check(ready(), documents)
+
     def test_both_external_dns_controllers_ignore_application_and_solver(self):
-        for start in (0, 4):
+        for start in (0, 5):
             for resource in ("application", "solver"):
                 for key in ("external-dns.alpha.kubernetes.io/controller", "external-dns.kubernetes.io/controller"):
                     with self.subTest(start=start, resource=resource, key=key):
