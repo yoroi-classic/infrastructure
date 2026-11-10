@@ -65,6 +65,7 @@ def rendered_fixture():
             {"kind": "Service", "metadata": {"name": "cardano-wallet-backend", "labels": labels.copy()},
              "spec": {"type": "ClusterIP", "selector": labels.copy(),
                       "ports": [{"port": 80, "targetPort": "http", "protocol": "TCP", "name": "http"}]}},
+            {"kind": "ServiceAccount", "metadata": {"name": "cardano-wallet-backend", "labels": labels.copy()}},
         ])
     return documents
 
@@ -73,7 +74,7 @@ class RenderBoundary(unittest.TestCase):
     def test_valid_boundary_and_rejected_regressions(self):
         check_render.check(ready(), rendered_fixture())
         for network in range(2):
-            start = network * 5
+            start = network * 6
             for change in ("missing-trust", "wrong-trust", "wrong-pod-labels", "wrong-policy-selector", "namespace-peer", "wrong-policy-type"):
                 with self.subTest(network=network, change=change):
                     documents = rendered_fixture()
@@ -93,8 +94,16 @@ class RenderBoundary(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         check_render.check(ready(), documents)
 
+    def test_unlabeled_extra_routes_and_resources_are_rejected(self):
+        for kind in ("Ingress", "Issuer", "Certificate", "ServiceAccount"):
+            with self.subTest(kind=kind):
+                documents = rendered_fixture()
+                documents.append({"kind": kind, "metadata": {"name": "unverified"}})
+                with self.assertRaisesRegex(ValueError, "approved supporting resources"):
+                    check_render.check(ready(), documents)
+
     def test_reject_tls_routing_and_public_service_regressions(self):
-        for start in (0, 5):
+        for start in (0, 6):
             for change in ("class", "tls", "tls-host", "protocols", "redirect", "issuer", "solver-class", "target", "public-service", "external-ip", "service-selector"):
                 with self.subTest(start=start, change=change):
                     documents = rendered_fixture()
@@ -125,7 +134,7 @@ class RenderBoundary(unittest.TestCase):
                         check_render.check(ready(), documents)
 
     def test_both_external_dns_controllers_ignore_application_and_solver(self):
-        for start in (0, 5):
+        for start in (0, 6):
             for resource in ("application", "solver"):
                 for key in ("external-dns.alpha.kubernetes.io/controller", "external-dns.kubernetes.io/controller"):
                     with self.subTest(start=start, resource=resource, key=key):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the rendered proxy boundary before accepting Helmfile changes."""
 import argparse
+from collections import Counter
 from pathlib import Path
 import yaml
 from helmfile_config import require
@@ -39,6 +40,10 @@ def check_service(service, pod_labels):
 
 
 def check(config, documents):
+    expected = Counter({"Deployment": 2, "Service": 2, "ServiceAccount": 2,
+                        "Ingress": 2, "NetworkPolicy": 2, "Issuer": 2})
+    require(Counter(doc.get("kind") for doc in documents) == expected,
+            "Render only the two backends and their approved supporting resources")
     deployments = [doc for doc in documents if doc.get("kind") == "Deployment"]
     policies = [doc for doc in documents if doc.get("kind") == "NetworkPolicy"]
     require(len(deployments) == 2 and len(policies) == 2, "Render both backend deployments and policies")
