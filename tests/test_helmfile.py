@@ -2,6 +2,7 @@
 import importlib.util
 import copy
 import json
+import os
 import io
 from pathlib import Path
 import sys
@@ -43,7 +44,7 @@ class DeploymentGuards(unittest.TestCase):
     def test_reject_unsafe_targets_and_settings(self):
         changes = [
             (("enabled",), False),
-            (("deployments",), {"mainnet": {}}),
+
             (("kong", "namespace"), "default"),
             (("kong", "ingressClass"), "traefik"),
             (("kong", "proxyService"), "replace-with-kong-proxy-service"),
@@ -81,6 +82,15 @@ class DeploymentGuards(unittest.TestCase):
                 target[path[-1]] = value
                 result = self.run_cli(config)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_reject_valid_deployments_for_an_unapproved_network(self):
+        config = ready()
+        preview = config["deployments"].pop("preprod")
+        preview.update(namespace="morrowwallet-preview", hostname="api-preview.morrowwallet.com")
+        config["deployments"]["preview"] = preview
+        result = self.run_cli(config)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Configure mainnet and preprod", result.stderr)
 
     def run_cli(self, config, *options):
         with tempfile.TemporaryDirectory() as directory:
@@ -157,6 +167,68 @@ class GatewayPrerequisites(unittest.TestCase):
                 candidate = copy.deepcopy(proxy)
                 candidate.update(change)
                 self.assertNotEqual(check(candidate).returncode, 0)
+
+
+class DeploymentWorkflow(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
+        cls.steps = {step.get("name"): step for step in workflow["jobs"]["helmfile"]["steps"]}
+
+    def run_step(self, step, directory, **values):
+        environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
+                           GKE_CONTEXT="bl-demeter", KONG_PROXY_SERVICE="kong-gateway-proxy",
+                           KONG_POD_SELECTOR="app.kubernetes.io/name=gateway", **values)
+        return subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+                              cwd=directory, env=environment, capture_output=True, text=True)
+
+    def test_prerequisites_reject_snat_and_untrusted_forwarded_headers(self):
+        step = self.steps["Verify shared ingress prerequisites"]
+        for policy, trusted, expected in (("Local", "127.0.0.1,::1", 0),
+                                          ("Cluster", "127.0.0.1,::1", 1),
+                                          ("Local", "0.0.0.0/0", 1)):
+            with self.subTest(policy=policy, trusted=trusted), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+                kubectl = directory / "kubectl"
+                kubectl.write_text("#!" + sys.executable + "\n" + """
+import json, os, sys
+args = sys.argv[1:]
+if 'service' in args:
+    print(json.dumps({'metadata': {'name': 'kong-gateway-proxy'},
+                      'spec': {'type': 'LoadBalancer', 'externalTrafficPolicy': os.environ['TEST_POLICY']},
+                      'status': {'loadBalancer': {'ingress': [{'ip': '192.0.2.1'}]}}}))
+elif 'pods' in args and 'get' in args:
+    if args[-1].startswith('go-template='):
+        print('1')
+    else:
+        print(json.dumps({'items': [{'spec': {'containers': [{'name': 'proxy', 'image': 'kong:3.9',
+            'env': [{'name': 'KONG_TRUSTED_IPS', 'value': os.environ['TEST_TRUSTED']}]}]}}]}))
+""")
+                kubectl.chmod(0o700)
+                result = self.run_step(step, directory, TEST_POLICY=policy, TEST_TRUSTED=trusted)
+                if expected == 0:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    message = "externalTrafficPolicy Local required" if policy == "Cluster" else "Kong prerequisite failed"
+                    self.assertIn(message, result.stderr)
+
+    def test_identity_step_uses_authenticated_identity_in_its_command(self):
+        step = self.steps["Verify the authenticated deployment project"]
+        self.assertEqual(step["env"]["AUTHENTICATED_PROJECT"], "${{ steps.auth.outputs.project_id }}")
+        for authenticated, expected in (("test-deployment-project", 0), ("another-project", 1)):
+            with self.subTest(authenticated=authenticated), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": ready()}))
+                result = self.run_step(step, directory, AUTHENTICATED_PROJECT=authenticated,
+                                       GKE_PROJECT="test-deployment-project")
+                if expected == 0:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("authenticated deployment identity", result.stderr)
 
 
 class EndpointVerification(unittest.TestCase):

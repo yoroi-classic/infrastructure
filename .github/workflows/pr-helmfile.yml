@@ -59,3 +59,4 @@ jobs:
         run: |
           helmfile -f helmfile-app/helmfile.yaml.gotmpl -e bl-demeter \
             --state-values-file "$RUNNER_TEMP/helmfile-render.yaml" template > "$RUNNER_TEMP/rendered.yaml"
+          python3 scripts/check-helmfile-render.py --config "$RUNNER_TEMP/helmfile-render.yaml" "$RUNNER_TEMP/rendered.yaml"
