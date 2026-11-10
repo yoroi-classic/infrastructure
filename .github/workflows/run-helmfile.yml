@@ -1,0 +1,22 @@
+name: run-helmfile
+
+on:
+  workflow_dispatch:
+    inputs:
+      arguments:
+        description: Helmfile operation on bl-demeter
+        required: true
+        type: choice
+        default: diff
+        options:
+          - diff
+          - apply
+
+permissions:
+  contents: read
+
+jobs:
+  helmfile:
+    uses: ./.github/workflows/common-helmfile.yml
+    with:
+      arguments: ${{ inputs.arguments }}
