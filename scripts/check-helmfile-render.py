@@ -6,15 +6,35 @@ import yaml
 from helmfile_config import require
 
 
+def check_dns_ignore(annotations, resource):
+    for prefix in ("external-dns.alpha.kubernetes.io", "external-dns.kubernetes.io"):
+        require(annotations.get(prefix + "/controller") == "ignore", "Exclude " + resource + " from external-dns")
+
+
 def check(config, documents):
     deployments = [doc for doc in documents if doc.get("kind") == "Deployment"]
     policies = [doc for doc in documents if doc.get("kind") == "NetworkPolicy"]
     require(len(deployments) == 2 and len(policies) == 2, "Render both backend deployments and policies")
+    ingresses = [doc for doc in documents if doc.get("kind") == "Ingress"]
+    issuers = [doc for doc in documents if doc.get("kind") == "Issuer" and doc["metadata"]["name"] == "morrowwallet-acme"]
+    require(len(issuers) == 2, "Render both ACME issuers")
+    for issuer in issuers:
+        solvers = issuer["spec"]["acme"]["solvers"]
+        require(len(solvers) == 1, "Use one HTTP-01 ACME solver")
+        annotations = solvers[0]["http01"]["ingress"]["ingressTemplate"]["metadata"].get("annotations", {})
+        check_dns_ignore(annotations, "ACME solver")
     for network in ("mainnet", "preprod"):
         instance = "cardano-wallet-backend-" + network
         apps = [doc for doc in deployments if doc["metadata"]["labels"].get("app.kubernetes.io/instance") == instance]
         rules = [doc for doc in policies if doc["spec"]["podSelector"]["matchLabels"].get("app.kubernetes.io/instance") == instance]
         require(len(apps) == 1 and len(rules) == 1, "Render one backend and policy for " + network)
+        selector = {"matchLabels": {"app.kubernetes.io/instance": instance}}
+        require(rules[0]["spec"]["podSelector"] == selector, "Select only backend pods for " + network)
+        pod_labels = apps[0]["spec"]["template"]["metadata"]["labels"]
+        require(pod_labels.get("app.kubernetes.io/instance") == instance, "Policy must select backend pod-template labels for " + network)
+        routes = [doc for doc in ingresses if doc["metadata"]["labels"].get("app.kubernetes.io/instance") == instance]
+        require(len(routes) == 1, "Render one backend Ingress for " + network)
+        check_dns_ignore(routes[0]["metadata"].get("annotations", {}), "backend Ingress " + network)
         containers = apps[0]["spec"]["template"]["spec"]["containers"]
         backend = [container for container in containers if container["name"] == "cardano-wallet-backend"]
         require(len(backend) == 1, "Missing backend container for " + network)

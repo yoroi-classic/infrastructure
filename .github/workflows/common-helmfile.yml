@@ -81,7 +81,7 @@ jobs:
           count=$(kubectl --context "$GKE_CONTEXT" --namespace kong get pods -l "$KONG_POD_SELECTOR" -o 'go-template={{len .items}}')
           test "$count" -gt 0
           kubectl --context "$GKE_CONTEXT" --namespace kong wait pods -l "$KONG_POD_SELECTOR" --for=condition=Ready --timeout=60s
-      - name: Run Helmfile
+      - name: Install Helmfile
         uses: helmfile/helmfile-action@712000e3d4e28c72778ecc53857746082f555ef3 # v2.0.4
         with:
           helmfile-version: v1.1.5
@@ -89,7 +89,15 @@ jobs:
           helm-plugins: https://github.com/databus23/helm-diff --version v3.12.5
           helmfile-auto-init: 'false'
           helmfile-workdirectory: helmfile-app
-          helmfile-args: '-e bl-demeter ${{ inputs.arguments }}'
+          helmfile-args: '--version'
+      - name: Render and validate published charts
+        run: |
+          helmfile -f helmfile-app/helmfile.yaml.gotmpl -e bl-demeter template > "$RUNNER_TEMP/rendered.yaml"
+          python3 scripts/check-helmfile-render.py --config config.yaml "$RUNNER_TEMP/rendered.yaml"
+      - name: Run Helmfile
+        env:
+          OPERATION: ${{ inputs.arguments }}
+        run: helmfile -f helmfile-app/helmfile.yaml.gotmpl -e bl-demeter "$OPERATION"
       - name: Check rollout and certificates
         if: inputs.arguments == 'apply'
         run: python3 scripts/verify-helmfile.py

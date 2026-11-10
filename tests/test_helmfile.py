@@ -22,6 +22,11 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 
+spec = importlib.util.spec_from_file_location("check_render", ROOT / "scripts/check-helmfile-render.py")
+check_render = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(check_render)
+
+
 def ready():
     config = yaml.safe_load((ROOT / "helmfile-app/config.yaml.example").read_text())["helmfile"]
     config["enabled"] = True
@@ -30,6 +35,68 @@ def ready():
     config["acme"]["email"] = "ops@example.invalid"
     config["image"]["tag"] = "sha-" + "1" * 40
     return config
+
+
+def rendered_fixture():
+    """Minimal manifests for the boundary contract; actual chart rendering runs in CI."""
+    documents = []
+    ignore = {"external-dns.alpha.kubernetes.io/controller": "ignore",
+              "external-dns.kubernetes.io/controller": "ignore"}
+    for network in ("mainnet", "preprod"):
+        labels = {"app.kubernetes.io/instance": "cardano-wallet-backend-" + network}
+        documents.extend([
+            {"kind": "Deployment", "metadata": {"labels": labels.copy()},
+             "spec": {"template": {"metadata": {"labels": labels.copy()}, "spec": {"containers": [
+                 {"name": "cardano-wallet-backend", "env": [{"name": "TRUST_PROXY", "value": "single-hop"}]}]}}}},
+            {"kind": "NetworkPolicy", "spec": {"podSelector": {"matchLabels": labels.copy()},
+                "policyTypes": ["Ingress"], "ingress": [{"from": [{
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kong"}},
+                    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "gateway", "app.kubernetes.io/instance": "kong"}}}],
+                    "ports": [{"protocol": "TCP", "port": 3010}]}]}},
+            {"kind": "Ingress", "metadata": {"labels": labels.copy(), "annotations": ignore.copy()}},
+            {"kind": "Issuer", "metadata": {"name": "morrowwallet-acme"}, "spec": {"acme": {"solvers": [
+                {"http01": {"ingress": {"ingressTemplate": {"metadata": {"annotations": ignore.copy()}}}}}]}}},
+        ])
+    return documents
+
+
+class RenderBoundary(unittest.TestCase):
+    def test_valid_boundary_and_rejected_regressions(self):
+        check_render.check(ready(), rendered_fixture())
+        for network in range(2):
+            start = network * 4
+            for change in ("missing-trust", "wrong-trust", "wrong-pod-labels", "wrong-policy-selector", "namespace-peer", "wrong-policy-type"):
+                with self.subTest(network=network, change=change):
+                    documents = rendered_fixture()
+                    deployment, policy = documents[start:start + 2]
+                    if change == "missing-trust":
+                        deployment["spec"]["template"]["spec"]["containers"][0]["env"] = []
+                    elif change == "wrong-trust":
+                        deployment["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] = ""
+                    elif change == "wrong-pod-labels":
+                        deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/instance"] = "other"
+                    elif change == "wrong-policy-selector":
+                        policy["spec"]["podSelector"]["matchLabels"]["absent-label"] = "other"
+                    elif change == "namespace-peer":
+                        del policy["spec"]["ingress"][0]["from"][0]["podSelector"]
+                    else:
+                        policy["spec"]["policyTypes"] = ["Egress"]
+                    with self.assertRaises(ValueError):
+                        check_render.check(ready(), documents)
+
+    def test_both_external_dns_controllers_ignore_application_and_solver(self):
+        for start in (0, 4):
+            for resource in ("application", "solver"):
+                for key in ("external-dns.alpha.kubernetes.io/controller", "external-dns.kubernetes.io/controller"):
+                    with self.subTest(start=start, resource=resource, key=key):
+                        documents = rendered_fixture()
+                        if resource == "application":
+                            annotations = documents[start + 2]["metadata"]["annotations"]
+                        else:
+                            annotations = documents[start + 3]["spec"]["acme"]["solvers"][0]["http01"]["ingress"]["ingressTemplate"]["metadata"]["annotations"]
+                        del annotations[key]
+                        with self.assertRaisesRegex(ValueError, "external-dns"):
+                            check_render.check(ready(), documents)
 
 
 class DeploymentGuards(unittest.TestCase):
@@ -174,6 +241,7 @@ class DeploymentWorkflow(unittest.TestCase):
     def setUpClass(cls):
         workflow = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
         cls.steps = {step.get("name"): step for step in workflow["jobs"]["helmfile"]["steps"]}
+        cls.order = [step.get("name") for step in workflow["jobs"]["helmfile"]["steps"]]
 
     def run_step(self, step, directory, **values):
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
@@ -213,6 +281,31 @@ elif 'pods' in args and 'get' in args:
                     self.assertNotEqual(result.returncode, 0)
                     message = "externalTrafficPolicy Local required" if policy == "Cluster" else "Kong prerequisite failed"
                     self.assertIn(message, result.stderr)
+
+    def test_published_render_is_checked_before_the_operation(self):
+        step = self.steps["Render and validate published charts"]
+        self.assertIsNone(step.get("if"))
+        self.assertFalse(step.get("continue-on-error", False))
+        self.assertLess(self.order.index(step["name"]), self.order.index("Run Helmfile"))
+        for valid in (True, False):
+            with self.subTest(valid=valid), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": ready()}))
+                documents = rendered_fixture()
+                if not valid:
+                    documents[0]["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] = ""
+                source = directory / "source.yaml"
+                source.write_text(yaml.safe_dump_all(documents))
+                helmfile = directory / "helmfile"
+                helmfile.write_text("#!" + sys.executable + "\nfrom pathlib import Path\nimport os\nprint(Path(os.environ['TEST_RENDER']).read_text())\n")
+                helmfile.chmod(0o700)
+                result = self.run_step(step, directory, RUNNER_TEMP=name, TEST_RENDER=str(source))
+                if valid:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Require single-hop", result.stderr)
 
     def test_identity_step_uses_authenticated_identity_in_its_command(self):
         step = self.steps["Verify the authenticated deployment project"]
