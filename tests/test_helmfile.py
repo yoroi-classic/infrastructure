@@ -410,6 +410,10 @@ class DeploymentWorkflow(unittest.TestCase):
     def test_each_deployment_config_step_rejects_disabled_deployments(self):
         for step_name in ("Prepare deployment configuration", "Verify the authenticated deployment project"):
             step = self.steps[step_name]
+            self.assertIsNone(step.get("if"))
+            self.assertFalse(step.get("continue-on-error", False))
+            credential_step = "GKE authentication" if step_name == "Prepare deployment configuration" else "Get bl-demeter credentials"
+            self.assertLess(self.order.index(step_name), self.order.index(credential_step))
             with self.subTest(step=step_name), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
