@@ -362,9 +362,22 @@ class DeploymentWorkflow(unittest.TestCase):
         self.assertIn("GCP_SERVICE_ACCOUNT_EMAIL", validation["run"])
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
-            result = self.run_step(validation, directory)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("GCP_WORKLOAD_IDENTITY_PROVIDER", result.stdout)
+            incomplete_configs = (
+                ("GCP_WORKLOAD_IDENTITY_PROVIDER", "",
+                 "deployer@example.iam.gserviceaccount.com"),
+                ("GCP_SERVICE_ACCOUNT_EMAIL",
+                 "projects/123/locations/global/workloadIdentityPools/ci/providers/github",
+                 ""),
+            )
+            for expected_error, provider_value, account_value in incomplete_configs:
+                with self.subTest(missing=expected_error):
+                    result = self.run_step(
+                        validation, directory,
+                        GCP_WORKLOAD_IDENTITY_PROVIDER=provider_value,
+                        GCP_SERVICE_ACCOUNT_EMAIL=account_value,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected_error, result.stdout)
             result = self.run_step(validation, directory,
                                    GCP_WORKLOAD_IDENTITY_PROVIDER="projects/123/locations/global/workloadIdentityPools/ci/providers/github",
                                    GCP_SERVICE_ACCOUNT_EMAIL="deployer@example.iam.gserviceaccount.com")

@@ -88,11 +88,17 @@ manages TLS Secrets. A deployer able to change workloads remains a trusted ident
 The configured GKE project must match the project hosting the target cluster.
 
 Provision these namespaces and the identity's access through the owning
-infrastructure process. This Helmfile does not create namespaces or
-require cluster-admin. It also reads the `kong` IngressClass, the cert-manager
-Issuer CRD, and Services/Pods in the `kong` namespace for prerequisite checks and
-load-balancer address discovery. Grant `get`/`list` on those Services and
-`get`/`list`/`watch` on those Pods, since readiness checks use `kubectl wait`.
+infrastructure process tracked in
+[infrastructure #8](https://github.com/yoroi-classic/infrastructure/issues/8).
+The cluster operator must provision these permissions before deployment; this
+repository's Terraform and Helmfile workflows do not create namespaces or
+cluster RBAC. No cluster-admin grant is required. The prerequisite check reads
+the cluster-scoped `ingressclasses/kong` and
+`customresourcedefinitions/issuers.cert-manager.io`, so grant `get` on those
+resources. It also reads Services and Pods in the `kong` namespace for
+prerequisite checks and load-balancer address discovery: grant `get`/`list` on
+Services and `get`/`list`/`watch` on Pods, since readiness checks use
+`kubectl wait`.
 
 Confirm that the shared Kong access-log configuration preserves wallet privacy:
 request paths and query strings can contain wallet addresses. This application
