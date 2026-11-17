@@ -158,6 +158,32 @@ class RenderBoundary(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     check_render.check(ready(), documents)
 
+    def test_reject_additional_policy_rules_peers_routes_and_solvers(self):
+        for start in (0, 6):
+            for change in ("unrestricted_policy_rule", "unrestricted_policy_peer", "hostless_route", "unchecked_dns_solver"):
+                with self.subTest(start=start, change=change):
+                    documents = rendered_fixture()
+                    if change == "unrestricted_policy_rule":
+                        documents[start + 1]["spec"]["ingress"].append({})
+                    elif change == "unrestricted_policy_peer":
+                        documents[start + 1]["spec"]["ingress"][0]["from"].append(
+                            {"namespaceSelector": {}}
+                        )
+                    elif change == "hostless_route":
+                        route = documents[start + 2]["spec"]["rules"][0]
+                        documents[start + 2]["spec"]["rules"].append(
+                            {"http": copy.deepcopy(route["http"])}
+                        )
+                    else:
+                        hostname = ready()["deployments"]["mainnet" if start == 0 else "preprod"]["hostname"]
+                        solver = {
+                            "selector": {"dnsNames": [hostname]},
+                            "dns01": {"cloudDNS": {}},
+                        }
+                        documents[start + 3]["spec"]["acme"]["solvers"].append(solver)
+                    with self.assertRaises(ValueError):
+                        check_render.check(ready(), documents)
+
     def test_both_external_dns_controllers_ignore_application_and_solver(self):
         for start in (0, 6):
             for resource in ("application", "solver"):
@@ -288,14 +314,18 @@ class GatewayPrerequisites(unittest.TestCase):
     def test_explicit_override_and_rejection_of_unverified_sources(self):
         proxy = {"name": "proxy", "image": "kong:3.9", "env": [
             {"name": "KONG_TRUSTED_IPS", "value": "127.0.0.1,::1"}]}
-        def check(container):
-            pods = {"items": [{"spec": {"containers": [container]}}]}
+        def check(containers):
+            pods = {"items": [{"spec": {"containers": [container]}} for container in containers]}
             return subprocess.run([sys.executable, str(ROOT / "scripts/check-kong.py")],
                                   input=json.dumps(pods), capture_output=True, text=True)
         for image in ("kong:3.9", "kong/kong-gateway:3.9", "docker.io/library/kong:3.9"):
             candidate = copy.deepcopy(proxy)
             candidate["image"] = image
-            self.assertEqual(check(candidate).returncode, 0)
+            self.assertEqual(check([candidate]).returncode, 0)
+        self.assertEqual(check([copy.deepcopy(proxy), copy.deepcopy(proxy)]).returncode, 0)
+        untrusted_second_pod = copy.deepcopy(proxy)
+        untrusted_second_pod["env"] = [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]
+        self.assertNotEqual(check([copy.deepcopy(proxy), untrusted_second_pod]).returncode, 0)
         for change in ({"env": []},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "127.0.0.1,::1"},
@@ -309,7 +339,7 @@ class GatewayPrerequisites(unittest.TestCase):
             with self.subTest(change=change):
                 candidate = copy.deepcopy(proxy)
                 candidate.update(change)
-                self.assertNotEqual(check(candidate).returncode, 0)
+                self.assertNotEqual(check([candidate]).returncode, 0)
 
 
 class DeploymentWorkflow(unittest.TestCase):
