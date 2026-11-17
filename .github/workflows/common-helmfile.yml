@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 defaults:
   run:
@@ -49,11 +50,19 @@ jobs:
         uses: azure/setup-kubectl@0c5e050edfed71b2b50731ab044d42489d51c129 # v4.0.0
         with:
           version: v1.32.3
+      - name: Validate workload identity configuration
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT_EMAIL: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+        run: |
+          test -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" || { echo "::error::Set the helmfile environment variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
+          test -n "$GCP_SERVICE_ACCOUNT_EMAIL" || { echo "::error::Set the helmfile environment variable GCP_SERVICE_ACCOUNT_EMAIL"; exit 1; }
       - name: GKE authentication
         id: auth
         uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
       - name: Verify the authenticated deployment project
         env:
           AUTHENTICATED_PROJECT: ${{ steps.auth.outputs.project_id }}

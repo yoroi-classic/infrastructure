@@ -346,8 +346,33 @@ class DeploymentWorkflow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         workflow = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
+        cls.workflow = workflow
         cls.steps = {step.get("name"): step for step in workflow["jobs"]["helmfile"]["steps"]}
         cls.order = [step.get("name") for step in workflow["jobs"]["helmfile"]["steps"]]
+
+    def test_workload_identity_permissions_and_configuration(self):
+        self.assertEqual(self.workflow["permissions"], {"contents": "read", "id-token": "write"})
+        auth = self.steps["GKE authentication"]["with"]
+        self.assertEqual(auth["workload_identity_provider"], "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}")
+        self.assertEqual(auth["service_account"], "${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}")
+        self.assertNotIn("credentials_json", auth)
+        validation = self.steps["Validate workload identity configuration"]
+        self.assertLess(self.order.index(validation["name"]), self.order.index("GKE authentication"))
+        self.assertIn("GCP_WORKLOAD_IDENTITY_PROVIDER", validation["run"])
+        self.assertIn("GCP_SERVICE_ACCOUNT_EMAIL", validation["run"])
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            result = self.run_step(validation, directory)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("GCP_WORKLOAD_IDENTITY_PROVIDER", result.stdout)
+            result = self.run_step(validation, directory,
+                                   GCP_WORKLOAD_IDENTITY_PROVIDER="projects/123/locations/global/workloadIdentityPools/ci/providers/github",
+                                   GCP_SERVICE_ACCOUNT_EMAIL="deployer@example.iam.gserviceaccount.com")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        for filename in ("run-helmfile.yml", "test-helmfile.yml"):
+            caller = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
+            self.assertEqual(caller["jobs"]["helmfile"]["permissions"],
+                             {"contents": "read", "id-token": "write"})
 
     def run_step(self, step, directory, **values):
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],

@@ -27,7 +27,7 @@ client address and must not trust arbitrary incoming forwarding headers.
 CI requires the Kong proxy LoadBalancer Service to use
 `externalTrafficPolicy: Local`, preserving client addresses rather than sharing
 a node's rate-limit bucket. Set `kong.proxyService` to the actual proxy Service.
-If the shared service needs changing, do so through the Blink Labs infrastructure
+If the shared service needs changing, do so through its owning infrastructure
 review/apply workflow before deploying this application. Confirm Kong's trusted-IP
 configuration and NetworkPolicy enforcement as part of setup. Set
 `gateway.env.trusted_ips: "127.0.0.1,::1"` in the shared Kong Helm values so a
@@ -60,25 +60,35 @@ with the OCI chart version. Credentialed diff/apply runs pull the OCI artifact.
 ## Protected CI environment and cluster access
 
 Create the GitHub environment **helmfile**, restricted to deployments from
-`main`, with required human reviewers. Add environment secrets:
+`main`, with required reviewers. Add the environment secret and variables:
 
 | Secret | Value |
 | --- | --- |
 | `SOPS_AGE_KEY` | The existing MorrowWallet CI age identity authorized for `config.yaml` |
-| `GCP_SERVICE_ACCOUNT` | JSON credentials for the identity used to deploy to `bl-demeter` |
 
-Follow the existing Blink Labs GKE authentication pattern. The identity needs
-GKE cluster discovery access, plus Kubernetes permissions to manage Helm
+Add these environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full Google Cloud Workload Identity Provider resource name |
+| `GCP_SERVICE_ACCOUNT_EMAIL` | Email address of the deployer service account |
+
+GitHub Actions authenticates through Workload Identity Federation; do not create
+or store a service-account JSON key. Configure the provider to trust this
+repository's `helmfile` GitHub environment and allow it to impersonate the
+designated deployer service account. The workflow fails before authentication
+if either variable is unset. The identity needs GKE cluster discovery access,
+plus Kubernetes permissions to manage Helm
 releases and their Deployments, Services, ServiceAccounts, ConfigMaps, Ingresses,
 NetworkPolicies, and cert-manager Issuers/Certificates in `morrowwallet-mainnet`
 and `morrowwallet-preprod`. CI sets `HELM_DRIVER=configmap`, so release state
 uses ConfigMaps rather than Secrets. Do not grant the deployer direct Secret
 read/write access: provider Secrets are operator-managed, and cert-manager
 manages TLS Secrets. A deployer able to change workloads remains a trusted identity.
-The configured GKE project must match the project in its service-account credentials.
+The configured GKE project must match the project hosting the target cluster.
 
-Provision these namespaces and the identity's access using the existing Blink
-Labs infrastructure workflow. This Helmfile does not create namespaces or
+Provision these namespaces and the identity's access through the owning
+infrastructure process. This Helmfile does not create namespaces or
 require cluster-admin. It also reads the `kong` IngressClass, the cert-manager
 Issuer CRD, and Services/Pods in the `kong` namespace for prerequisite checks and
 load-balancer address discovery. Grant `get`/`list` on those Services and
