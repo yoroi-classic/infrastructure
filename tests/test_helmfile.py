@@ -133,6 +133,31 @@ class RenderBoundary(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         check_render.check(ready(), documents)
 
+    def test_reject_policy_bypass_and_untrusted_ingress_variants(self):
+        cases = ("relabelled_pod_and_service", "duplicate_trust_proxy", "catch_all_route", "external_dns_controller")
+        for change in cases:
+            with self.subTest(change=change):
+                documents = rendered_fixture()
+                if change == "relabelled_pod_and_service":
+                    deployment, _, _, _, service, _ = documents[:6]
+                    deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/instance"] = "other"
+                    service["spec"]["selector"]["app.kubernetes.io/instance"] = "other"
+                elif change == "duplicate_trust_proxy":
+                    deployment = documents[0]
+                    deployment["spec"]["template"]["spec"]["containers"][0]["env"].append(
+                        {"name": "TRUST_PROXY", "value": ""}
+                    )
+                elif change == "catch_all_route":
+                    documents[2]["spec"]["defaultBackend"] = {
+                        "service": {"name": "attacker", "port": {"number": 80}}
+                    }
+                else:
+                    documents[2]["metadata"]["annotations"][
+                        "external-dns.alpha.kubernetes.io/controller"
+                    ] = "dns-controller"
+                with self.assertRaises(ValueError):
+                    check_render.check(ready(), documents)
+
     def test_both_external_dns_controllers_ignore_application_and_solver(self):
         for start in (0, 6):
             for resource in ("application", "solver"):
@@ -273,6 +298,8 @@ class GatewayPrerequisites(unittest.TestCase):
             self.assertEqual(check(candidate).returncode, 0)
         for change in ({"env": []},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
+                       {"env": [{"name": "KONG_TRUSTED_IPS", "value": "127.0.0.1,::1"},
+                                {"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "valueFrom": {"secretKeyRef": {"name": "test-only", "key": "trusted"}}}]},
                        {"envFrom": [{"configMapRef": {"name": "test-only"}}]},
                        {"command": ["sh", "-c", "kong start"]},
