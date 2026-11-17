@@ -184,6 +184,25 @@ class RenderBoundary(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         check_render.check(ready(), documents)
 
+    def test_reject_unrestricted_entries_before_the_expected_entries(self):
+        for start in (0, 6):
+            for change in ("unrestricted_policy_rule", "unrestricted_policy_peer", "hostless_route"):
+                with self.subTest(start=start, change=change):
+                    documents = rendered_fixture()
+                    if change == "unrestricted_policy_rule":
+                        documents[start + 1]["spec"]["ingress"].insert(0, {})
+                    elif change == "unrestricted_policy_peer":
+                        documents[start + 1]["spec"]["ingress"][0]["from"].insert(
+                            0, {"namespaceSelector": {}}
+                        )
+                    else:
+                        route = documents[start + 2]["spec"]["rules"][0]
+                        documents[start + 2]["spec"]["rules"].insert(
+                            0, {"http": copy.deepcopy(route["http"])}
+                        )
+                    with self.assertRaises(ValueError):
+                        check_render.check(ready(), documents)
+
     def test_both_external_dns_controllers_ignore_application_and_solver(self):
         for start in (0, 6):
             for resource in ("application", "solver"):
@@ -326,6 +345,7 @@ class GatewayPrerequisites(unittest.TestCase):
         untrusted_second_pod = copy.deepcopy(proxy)
         untrusted_second_pod["env"] = [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]
         self.assertNotEqual(check([copy.deepcopy(proxy), untrusted_second_pod]).returncode, 0)
+        self.assertNotEqual(check([untrusted_second_pod, copy.deepcopy(proxy)]).returncode, 0)
         for change in ({"env": []},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "0.0.0.0/0"}]},
                        {"env": [{"name": "KONG_TRUSTED_IPS", "value": "127.0.0.1,::1"},
@@ -386,6 +406,27 @@ class DeploymentWorkflow(unittest.TestCase):
             caller = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
             self.assertEqual(caller["jobs"]["helmfile"]["permissions"],
                              {"contents": "read", "id-token": "write"})
+
+    def test_each_deployment_config_step_rejects_disabled_deployments(self):
+        for step_name in ("Prepare deployment configuration", "Verify the authenticated deployment project"):
+            step = self.steps[step_name]
+            with self.subTest(step=step_name), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+                config = ready()
+                config["enabled"] = False
+                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": config}))
+                fake_sops = directory / "sops"
+                fake_sops.write_text("#!/bin/sh\nexit 0\n")
+                fake_sops.chmod(0o700)
+                result = self.run_step(
+                    step,
+                    directory,
+                    GITHUB_ENV=str(directory / "github-env"),
+                    AUTHENTICATED_PROJECT="test-deployment-project",
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Enable Helmfile only after setup is complete", result.stderr)
 
     def run_step(self, step, directory, **values):
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
