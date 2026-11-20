@@ -372,6 +372,8 @@ class DeploymentWorkflow(unittest.TestCase):
 
     def test_workload_identity_permissions_and_configuration(self):
         self.assertEqual(self.workflow["permissions"], {"contents": "read", "id-token": "write"})
+        triggers = self.workflow.get("on", self.workflow.get(True))
+        self.assertEqual(triggers["workflow_call"]["secrets"], {"SOPS_AGE_KEY": {"required": True}})
         auth = self.steps["GKE authentication"]["with"]
         self.assertEqual(auth["workload_identity_provider"], "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}")
         self.assertEqual(auth["service_account"], "${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}")
@@ -406,6 +408,8 @@ class DeploymentWorkflow(unittest.TestCase):
             caller = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
             self.assertEqual(caller["jobs"]["helmfile"]["permissions"],
                              {"contents": "read", "id-token": "write"})
+            self.assertEqual(caller["jobs"]["helmfile"]["secrets"],
+                             {"SOPS_AGE_KEY": "${{ secrets.SOPS_AGE_KEY }}"})
 
     def test_each_deployment_config_step_rejects_disabled_deployments(self):
         for step_name in ("Prepare deployment configuration", "Verify the authenticated deployment project"):

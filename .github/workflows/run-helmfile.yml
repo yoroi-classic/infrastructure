@@ -21,5 +21,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/common-helmfile.yml
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     with:
       arguments: ${{ inputs.arguments }}

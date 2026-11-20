@@ -6,6 +6,9 @@ on:
       arguments:
         required: true
         type: string
+    secrets:
+      SOPS_AGE_KEY:
+        required: true
 
 permissions:
   contents: read
