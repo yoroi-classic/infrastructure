@@ -57,16 +57,16 @@ when those settings have not been added yet. It never decrypts production
 configuration or accesses the shared cluster. Update that source pin together
 with the OCI chart version. Credentialed diff/apply runs pull the OCI artifact.
 
-## Protected CI environment and cluster access
+## CI credentials and cluster access
 
-Create the GitHub environment **helmfile**, restricted to deployments from
-`main`, with required reviewers. Add the environment secret and variables:
+Deployment jobs run only from `main`. Configure these repository secrets and
+Actions variables:
 
 | Secret | Value |
 | --- | --- |
 | `SOPS_AGE_KEY` | The existing MorrowWallet CI age identity authorized for `config.yaml` |
 
-Add these environment variables:
+Add these repository Actions variables:
 
 | Variable | Value |
 | --- | --- |
@@ -75,10 +75,12 @@ Add these environment variables:
 
 GitHub Actions authenticates through Workload Identity Federation; do not create
 or store a service-account JSON key. Configure the provider to trust this
-repository's `helmfile` GitHub environment and allow it to impersonate the
+repository's `refs/heads/main` workflow identity and allow it to impersonate the
 designated deployer service account. The workflow fails before authentication
-if either variable is unset. The identity needs GKE cluster discovery access,
-plus Kubernetes permissions to manage Helm
+if either variable is unset. The identity needs GKE cluster discovery access
+(`roles/container.clusterViewer`). Before checking Kong, CI reads the cluster's
+network configuration and requires enabled NetworkPolicy enforcement or GKE
+Dataplane V2. The identity also needs Kubernetes permissions to manage Helm
 releases and their Deployments, Services, ServiceAccounts, ConfigMaps, Ingresses,
 NetworkPolicies, and cert-manager Issuers/Certificates in `morrowwallet-mainnet`
 and `morrowwallet-preprod`. CI sets `HELM_DRIVER=configmap`, so release state
@@ -128,7 +130,7 @@ the zero image tag with a successfully published commit tag, set the real
 `kong.proxyService` name and gateway pod selector, and confirm the
 proposed hostnames `api.morrowwallet.com` and `api-preprod.morrowwallet.com`.
 Keep the chart and image pins explicit. Set `helmfile.enabled: true` only after
-the protected environment, packages, namespaces, and cluster permissions are
+the CI credentials, packages, namespaces, and cluster permissions are
 ready. The helper sets only the `helmfile` section through SOPS, preserving the
 Terraform/Cloudflare settings and regenerating the file's integrity metadata.
 Commit the resulting `config.yaml` through a reviewed PR. Subsequent edits use
@@ -144,7 +146,7 @@ shared rate-limit/cache behavior before increasing replicas.
 
 1. Merge reviewed code and completed SOPS configuration. Run **Actions →
    test-helmfile** on `main`, or **run-helmfile** with `arguments: diff`.
-   Approve the protected environment deployment. The prerequisite step reports
+   The prerequisite step reports
    the existing Kong load-balancer address.
 2. Add DNS records through `sops config.yaml` and the existing Terraform
    plan/apply workflow. For an IPv4 load balancer, add these to the existing
@@ -171,7 +173,7 @@ shared rate-limit/cache behavior before increasing replicas.
    validation requires public port 80 to reach Kong. The temporary ACME solver
    route handles its challenge path; the backend route redirects HTTP to HTTPS.
 4. Run **Actions → run-helmfile** on `main`, choose `arguments: apply`, review
-   the diff, and approve the protected deployment. Releases wait for readiness
+   the diff. Releases wait for readiness
    and roll back individually on Helm failure. The post-apply step waits for
    backend rollouts and certificate readiness, then verifies HTTPS health and the
    expected network/provider with a healthy chain status. HTTPS startup and
@@ -185,7 +187,7 @@ shared rate-limit/cache behavior before increasing replicas.
    backend Services remain ClusterIP-only. Run endpoint checks from a trusted
    terminal without including wallet data in logs.
 
-All cluster deployment and DNS changes use their respective protected CI
+All cluster deployment and DNS changes use their respective CI
 workflows. No live apply is performed by PR validation. To roll back, revert
 settings or image/chart pins through a reviewed PR and use the same diff/apply
 workflow; do not delete namespaces, TLS Secrets, or unrelated cluster releases.

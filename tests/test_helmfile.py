@@ -439,12 +439,30 @@ class DeploymentWorkflow(unittest.TestCase):
         return subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
                               cwd=directory, env=environment, capture_output=True, text=True)
 
-    def test_prerequisites_reject_snat_and_untrusted_forwarded_headers(self):
+    def test_prerequisites_enforce_network_isolation_and_gateway_trust(self):
         step = self.steps["Verify shared ingress prerequisites"]
-        for policy, trusted, expected in (("Local", "127.0.0.1,::1", 0),
-                                          ("Cluster", "127.0.0.1,::1", 1),
-                                          ("Local", "0.0.0.0/0", 1)):
-            with self.subTest(policy=policy, trusted=trusted), tempfile.TemporaryDirectory() as name:
+        self.assertIsNone(step.get("if"))
+        self.assertFalse(step.get("continue-on-error", False))
+        self.assertLess(self.order.index("GKE authentication"), self.order.index("Set up Google Cloud CLI"))
+        self.assertLess(self.order.index("Set up Google Cloud CLI"), self.order.index(step["name"]))
+        self.assertLess(self.order.index(step["name"]), self.order.index("Run Helmfile"))
+        enabled = {"networkPolicy": {"enabled": True}}
+        cases = [
+            ("Local", "127.0.0.1,::1", enabled, None),
+            ("Cluster", "127.0.0.1,::1", enabled, "externalTrafficPolicy Local required"),
+            ("Local", "0.0.0.0/0", enabled, "Kong prerequisite failed"),
+            ("Local", "127.0.0.1,::1", {"networkConfig": {"datapathProvider": "ADVANCED_DATAPATH"}}, None),
+            ("Local", "127.0.0.1,::1", {"networkPolicy": {"enabled": False},
+                                        "networkConfig": {"datapathProvider": "ADVANCED_DATAPATH"}}, None),
+        ]
+        for cluster in ({}, {"networkPolicy": {"enabled": False}},
+                        {"networkPolicy": {"enabled": "true"}},
+                        {"networkConfig": {"datapathProvider": "LEGACY_DATAPATH"}},
+                        {"addonsConfig": {"networkPolicyConfig": {"disabled": False}}}):
+            cases.append(("Local", "127.0.0.1,::1", cluster, "requires GKE NetworkPolicy enforcement"))
+        cases.append(("Local", "127.0.0.1,::1", "discovery failure", "cluster discovery failed"))
+        for policy, trusted, cluster, expected_error in cases:
+            with self.subTest(policy=policy, trusted=trusted, cluster=cluster), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
                 kubectl = directory / "kubectl"
@@ -463,13 +481,26 @@ elif 'pods' in args and 'get' in args:
             'env': [{'name': 'KONG_TRUSTED_IPS', 'value': os.environ['TEST_TRUSTED']}]}]}}]}))
 """)
                 kubectl.chmod(0o700)
-                result = self.run_step(step, directory, TEST_POLICY=policy, TEST_TRUSTED=trusted)
-                if expected == 0:
+                gcloud = directory / "gcloud"
+                gcloud.write_text("#!" + sys.executable + "\n" + """
+import json, os, sys
+assert sys.argv[1:] == ['container', 'clusters', 'describe', 'test-cluster',
+                       '--project', 'test-deployment-project', '--location', 'test-region', '--format=json']
+if json.loads(os.environ['TEST_CLUSTER']) == 'discovery failure':
+    print(json.dumps({'networkPolicy': {'enabled': True}}))
+    print('cluster discovery failed', file=sys.stderr)
+    sys.exit(1)
+print(os.environ['TEST_CLUSTER'])
+""")
+                gcloud.chmod(0o700)
+                result = self.run_step(step, directory, TEST_POLICY=policy, TEST_TRUSTED=trusted,
+                                       TEST_CLUSTER=json.dumps(cluster), GKE_NAME="test-cluster",
+                                       GKE_PROJECT="test-deployment-project", GKE_LOCATION="test-region")
+                if expected_error is None:
                     self.assertEqual(result.returncode, 0, result.stderr)
                 else:
                     self.assertNotEqual(result.returncode, 0)
-                    message = "externalTrafficPolicy Local required" if policy == "Cluster" else "Kong prerequisite failed"
-                    self.assertIn(message, result.stderr)
+                    self.assertIn(expected_error, result.stderr)
 
     def test_published_render_is_checked_before_the_operation(self):
         step = self.steps["Render and validate published charts"]

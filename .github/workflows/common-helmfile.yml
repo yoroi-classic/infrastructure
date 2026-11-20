@@ -22,7 +22,6 @@ concurrency:
 jobs:
   helmfile:
     if: github.ref == 'refs/heads/main'
-    environment: helmfile
     runs-on: ubuntu-latest
     env:
       HELM_DRIVER: configmap
@@ -55,8 +54,8 @@ jobs:
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_SERVICE_ACCOUNT_EMAIL: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
         run: |
-          test -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" || { echo "::error::Set the helmfile environment variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
-          test -n "$GCP_SERVICE_ACCOUNT_EMAIL" || { echo "::error::Set the helmfile environment variable GCP_SERVICE_ACCOUNT_EMAIL"; exit 1; }
+          test -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" || { echo "::error::Set the repository Actions variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
+          test -n "$GCP_SERVICE_ACCOUNT_EMAIL" || { echo "::error::Set the repository Actions variable GCP_SERVICE_ACCOUNT_EMAIL"; exit 1; }
       - name: GKE authentication
         id: auth
         uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
@@ -67,6 +66,10 @@ jobs:
         env:
           AUTHENTICATED_PROJECT: ${{ steps.auth.outputs.project_id }}
         run: python3 scripts/check-helmfile-config.py --deploy --authenticated-project "$AUTHENTICATED_PROJECT"
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ env.GKE_PROJECT }}
       - name: Get bl-demeter credentials
         id: cluster
         uses: google-github-actions/get-gke-credentials@d0cee45012069b163a631894b98904a9e6723729 # v2.3.3
@@ -77,6 +80,10 @@ jobs:
           context_name: ${{ env.GKE_CONTEXT }}
       - name: Verify shared ingress prerequisites
         run: |
+          gcloud container clusters describe "$GKE_NAME" --project "$GKE_PROJECT" --location "$GKE_LOCATION" --format=json |
+            jq -e 'if .networkPolicy.enabled == true or .networkConfig.datapathProvider == "ADVANCED_DATAPATH" then
+              "NetworkPolicy enforcement verified"
+              else error("Backend single-hop proxy trust requires GKE NetworkPolicy enforcement") end'
           kubectl --context "$GKE_CONTEXT" get ingressclass kong
           kubectl --context "$GKE_CONTEXT" get crd issuers.cert-manager.io
           kubectl --context "$GKE_CONTEXT" --namespace kong get service "$KONG_PROXY_SERVICE" -o json |
