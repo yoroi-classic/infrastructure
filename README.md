@@ -2,8 +2,8 @@
 
 Terraform for the existing `morrowwallet.com` Cloudflare zone and its private R2
 state bucket. Configuration lives in `config.yaml`; SOPS uses MorrowWallet age
-recipients in `.sops.yaml`. All accounts, keys, buckets, and recipients belong
-to MorrowWallet. Related: [clanker#34](https://github.com/yoroi-classic/clanker/issues/34).
+recipients in `.sops.yaml`. The Cloudflare account, R2 bucket, Cloudflare credentials, and SOPS recipients
+belong to MorrowWallet. Related: [clanker#34](https://github.com/yoroi-classic/clanker/issues/34).
 
 ## Terraform and CI
 
@@ -160,3 +160,10 @@ actionlint .github/workflows/test-terraform.yml .github/workflows/run-terraform.
 State, saved plans, and `.terraform/` are ignored. `backend.tf.example` declares
 the bootstrap backend; CI creates `backend.tf` only after the local apply.
 All backend values come from `config.yaml`.
+
+## Backend deployment
+
+[`helmfile-app`](helmfile-app/README.md) deploys the backend chart into the shared
+Blink Labs `bl-demeter` cluster. Kong terminates TLS; MorrowWallet DNS stays under
+this repository's Terraform configuration. Mainnet and preprod use separate
+namespaces. Deployment settings are added to `config.yaml` through SOPS.

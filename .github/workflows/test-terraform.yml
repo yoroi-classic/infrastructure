@@ -4,13 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - config.yaml
-      - .sops.yaml
-      - terraform/**
-      - scripts/**
-      - tests/**
-      - .github/workflows/*terraform.yml
 
 permissions:
   contents: read

@@ -1,0 +1,78 @@
+environments:
+  bl-demeter:
+    values:
+      - ../config.yaml
+---
+kubeContext: {{ .Values.helmfile.cluster.context | quote }}
+
+helmDefaults:
+  wait: true
+  atomic: true
+  createNamespace: false
+  timeout: 600
+  diffArgs:
+    - --suppress-secrets
+
+releases:
+{{- range $network, $app := .Values.helmfile.deployments }}
+  - name: morrowwallet-policy-{{ $network }}
+    namespace: {{ $app.namespace | quote }}
+    chart: ./charts/morrowwallet-policy
+    labels:
+      network: {{ $network | quote }}
+    values:
+      - backendRelease: cardano-wallet-backend-{{ $network }}
+        kongNamespace: {{ $.Values.helmfile.kong.namespace | quote }}
+        backendPort: {{ $.Values.helmfile.backendPort }}
+        kongPodSelector:
+{{ $.Values.helmfile.kong.podSelector | toYaml | indent 10 }}
+        ingressClass: {{ $.Values.helmfile.kong.ingressClass | quote }}
+        acmeEmail: {{ $.Values.helmfile.acme.email | quote }}
+        acmeServer: {{ $.Values.helmfile.acme.server | quote }}
+
+  - name: cardano-wallet-backend-{{ $network }}
+    namespace: {{ $app.namespace | quote }}
+    chart: {{ $.Values.helmfile.chart.source | quote }}
+    version: {{ $.Values.helmfile.chart.version | quote }}
+    needs:
+      - {{ $app.namespace }}/morrowwallet-policy-{{ $network }}
+    labels:
+      network: {{ $network | quote }}
+    values:
+      - fullnameOverride: cardano-wallet-backend
+        replicaCount: {{ $app.replicas }}
+        image:
+          repository: {{ $.Values.helmfile.image.repository | quote }}
+          tag: {{ $.Values.helmfile.image.tag | quote }}
+        service:
+          type: ClusterIP
+          port: 80
+        config:
+          network: {{ $network | quote }}
+          provider: {{ $app.provider | quote }}
+          port: {{ $.Values.helmfile.backendPort }}
+          trustProxy: single-hop
+        secrets:
+          existingSecret: {{ $app.existingSecret | quote }}
+        resources:
+{{ $.Values.helmfile.resources | toYaml | indent 10 }}
+        ingress:
+          enabled: true
+          className: {{ $.Values.helmfile.kong.ingressClass | quote }}
+          annotations:
+            cert-manager.io/issuer: morrowwallet-acme
+            konghq.com/protocols: https
+            konghq.com/https-redirect-status-code: "308"
+            konghq.com/strip-path: "false"
+            external-dns.alpha.kubernetes.io/controller: ignore
+            external-dns.kubernetes.io/controller: ignore
+          hosts:
+            - host: {{ $app.hostname | quote }}
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - secretName: morrowwallet-tls
+              hosts:
+                - {{ $app.hostname | quote }}
+{{- end }}

@@ -1,0 +1,27 @@
+name: run-helmfile
+
+on:
+  workflow_dispatch:
+    inputs:
+      arguments:
+        description: Helmfile operation on bl-demeter
+        required: true
+        type: choice
+        default: diff
+        options:
+          - diff
+          - apply
+
+permissions:
+  contents: read
+
+jobs:
+  helmfile:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/common-helmfile.yml
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    with:
+      arguments: ${{ inputs.arguments }}

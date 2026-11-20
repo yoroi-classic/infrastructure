@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: morrowwallet-backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ required "backendRelease is required" .Values.backendRelease | quote }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.kongNamespace | quote }}
+          podSelector:
+            matchLabels:
+{{ required "kongPodSelector is required" .Values.kongPodSelector | toYaml | indent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.backendPort }}

@@ -1,0 +1,47 @@
+helmfile:
+  enabled: false
+  cluster:
+    project: REPLACE_WITH_GCP_PROJECT
+    name: dmtr-cluster
+    location: us-central1
+    context: bl-demeter
+  chart:
+    source: oci://ghcr.io/yoroi-classic/charts/cardano-wallet-backend
+    version: 0.1.3
+  image:
+    repository: ghcr.io/yoroi-classic/cardano-wallet-backend
+    # Replace with the full commit tag reported by publish-image.
+    tag: sha-0000000000000000000000000000000000000000
+  backendPort: 3010
+  kong:
+    namespace: kong
+    ingressClass: kong
+    # Replace with the actual shared Kong proxy Service before enabling.
+    proxyService: replace-with-kong-proxy-service
+    # Confirm these labels against the existing Kong gateway pods.
+    podSelector:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/instance: kong
+  acme:
+    email: REPLACE_WITH_ACME_EMAIL
+    server: https://acme-v02.api.letsencrypt.org/directory
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  deployments:
+    mainnet:
+      namespace: morrowwallet-mainnet
+      hostname: api.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''
+    preprod:
+      namespace: morrowwallet-preprod
+      hostname: api-preprod.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''
