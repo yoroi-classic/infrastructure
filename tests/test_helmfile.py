@@ -28,13 +28,18 @@ spec.loader.exec_module(check_render)
 
 
 def ready():
-    config = yaml.safe_load((ROOT / "helmfile-app/config.yaml.example").read_text())["helmfile"]
+    config = yaml.safe_load((ROOT / "helmfile-app/values.yaml").read_text())["helmfile"]
     config["enabled"] = True
     config["kong"]["proxyService"] = "kong-gateway-proxy"
     config["cluster"]["project"] = "test-deployment-project"
     config["acme"]["email"] = "ops@example.invalid"
     config["image"]["tag"] = "sha-" + "1" * 40
     return config
+
+
+def write_values(directory, config):
+    (directory / "helmfile-app").mkdir()
+    (directory / "helmfile-app/values.yaml").write_text(yaml.safe_dump({"helmfile": config}))
 
 
 def rendered_fixture():
@@ -373,7 +378,7 @@ class DeploymentWorkflow(unittest.TestCase):
     def test_workload_identity_permissions_and_configuration(self):
         self.assertEqual(self.workflow["permissions"], {"contents": "read", "id-token": "write"})
         triggers = self.workflow.get("on", self.workflow.get(True))
-        self.assertEqual(triggers["workflow_call"]["secrets"], {"SOPS_AGE_KEY": {"required": True}})
+        self.assertNotIn("secrets", triggers["workflow_call"])
         auth = self.steps["GKE authentication"]["with"]
         self.assertEqual(auth["workload_identity_provider"], "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}")
         self.assertEqual(auth["service_account"], "${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}")
@@ -408,8 +413,7 @@ class DeploymentWorkflow(unittest.TestCase):
             caller = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
             self.assertEqual(caller["jobs"]["helmfile"]["permissions"],
                              {"contents": "read", "id-token": "write"})
-            self.assertEqual(caller["jobs"]["helmfile"]["secrets"],
-                             {"SOPS_AGE_KEY": "${{ secrets.SOPS_AGE_KEY }}"})
+            self.assertNotIn("secrets", caller["jobs"]["helmfile"])
 
     def test_each_deployment_config_step_rejects_disabled_deployments(self):
         for step_name in ("Prepare deployment configuration", "Verify the authenticated deployment project"):
@@ -423,10 +427,7 @@ class DeploymentWorkflow(unittest.TestCase):
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
                 config = ready()
                 config["enabled"] = False
-                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": config}))
-                fake_sops = directory / "sops"
-                fake_sops.write_text("#!/bin/sh\nexit 0\n")
-                fake_sops.chmod(0o700)
+                write_values(directory, config)
                 result = self.run_step(
                     step,
                     directory,
@@ -515,7 +516,7 @@ print(os.environ['TEST_CLUSTER'])
             with self.subTest(valid=valid), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
-                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": ready()}))
+                write_values(directory, ready())
                 documents = rendered_fixture()
                 if not valid:
                     documents[0]["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] = ""
@@ -538,7 +539,7 @@ print(os.environ['TEST_CLUSTER'])
             with self.subTest(authenticated=authenticated), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
-                (directory / "config.yaml").write_text(yaml.safe_dump({"helmfile": ready()}))
+                write_values(directory, ready())
                 result = self.run_step(step, directory, AUTHENTICATED_PROJECT=authenticated,
                                        GKE_PROJECT="test-deployment-project")
                 if expected == 0:
@@ -546,6 +547,48 @@ print(os.environ['TEST_CLUSTER'])
                 else:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("authenticated deployment identity", result.stderr)
+
+
+class DeployOnMerge(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = yaml.safe_load((ROOT / ".github/workflows/run-helmfile.yml").read_text())
+        cls.triggers = cls.workflow.get("on", cls.workflow.get(True))
+
+    def test_merge_to_main_applies(self):
+        self.assertEqual(self.triggers["push"]["branches"], ["main"])
+        self.assertIn("helmfile-app/**", self.triggers["push"]["paths"])
+        self.assertEqual(self.workflow["jobs"]["helmfile"]["with"]["arguments"],
+                         "${{ github.event_name == 'push' && 'apply' || inputs.arguments }}")
+
+    def test_deploy_waits_for_the_credential_free_switch(self):
+        gate = self.workflow["jobs"]["enabled"]
+        self.assertNotIn("permissions", gate)
+        self.assertNotIn("secrets", gate)
+        self.assertEqual(self.workflow["jobs"]["helmfile"]["needs"], "enabled")
+        self.assertEqual(self.workflow["jobs"]["helmfile"]["if"], "needs.enabled.outputs.enabled == 'true'")
+        step = next(s for s in gate["steps"] if s.get("id") == "check")
+        for enabled, expected in ((True, "enabled=true"), (False, "enabled=false"), ("yes", "enabled=false")):
+            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                config = ready()
+                config["enabled"] = enabled
+                write_values(directory, config)
+                output = directory / "github-output"
+                result = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+                                        cwd=directory, env=dict(os.environ, GITHUB_OUTPUT=str(output)),
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text().strip(), expected)
+
+    def test_no_approval_environment_or_decryption_key(self):
+        for filename in ("common-helmfile.yml", "run-helmfile.yml", "test-helmfile.yml", "pr-helmfile.yml"):
+            text = (ROOT / ".github/workflows" / filename).read_text()
+            workflow = yaml.safe_load(text)
+            with self.subTest(workflow=filename):
+                self.assertNotIn("SOPS_AGE_KEY", text)
+                for job in workflow["jobs"].values():
+                    self.assertNotIn("environment", job)
 
 
 class EndpointVerification(unittest.TestCase):

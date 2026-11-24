@@ -6,9 +6,6 @@ on:
       arguments:
         required: true
         type: string
-    secrets:
-      SOPS_AGE_KEY:
-        required: true
 
 permissions:
   contents: read
@@ -37,17 +34,8 @@ jobs:
           OPERATION: ${{ inputs.arguments }}
         run: |
           case "$OPERATION" in diff|apply) ;; *) exit 1 ;; esac
-      - name: Install SOPS
-        uses: mdgreenwald/mozilla-sops-action@d9714e521cbaecdae64a89d2fdd576dd2aa97056 # v1.6.0
-        with:
-          version: 3.11.0
       - name: Prepare deployment configuration
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          umask 077
-          sops --decrypt --in-place config.yaml
-          python3 scripts/check-helmfile-config.py --deploy --github-env "$GITHUB_ENV"
+        run: python3 scripts/check-helmfile-config.py --deploy --github-env "$GITHUB_ENV"
       - name: Install kubectl
         uses: azure/setup-kubectl@0c5e050edfed71b2b50731ab044d42489d51c129 # v4.0.0
         with:
@@ -112,7 +100,7 @@ jobs:
       - name: Render and validate published charts
         run: |
           helmfile -f helmfile-app/helmfile.yaml.gotmpl -e bl-demeter template > "$RUNNER_TEMP/rendered.yaml"
-          python3 scripts/check-helmfile-render.py --config config.yaml "$RUNNER_TEMP/rendered.yaml"
+          python3 scripts/check-helmfile-render.py --config helmfile-app/values.yaml "$RUNNER_TEMP/rendered.yaml"
       - name: Run Helmfile
         env:
           OPERATION: ${{ inputs.arguments }}
@@ -120,6 +108,3 @@ jobs:
       - name: Check rollout and certificates
         if: inputs.arguments == 'apply'
         run: python3 scripts/verify-helmfile.py
-      - name: Restore encrypted configuration
-        if: always()
-        run: git restore -- config.yaml

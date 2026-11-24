@@ -1,7 +1,7 @@
 environments:
   bl-demeter:
     values:
-      - ../config.yaml
+      - values.yaml
 ---
 kubeContext: {{ .Values.helmfile.cluster.context | quote }}
 

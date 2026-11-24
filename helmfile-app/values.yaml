@@ -1,7 +1,10 @@
 helmfile:
+  # Merging a change to this file on main deploys it. Keep false until the
+  # backend image is published, the deployer identity accepts main, and the
+  # API DNS records resolve to Kong.
   enabled: false
   cluster:
-    project: REPLACE_WITH_GCP_PROJECT
+    project: blinklabs-demeter
     name: dmtr-cluster
     location: us-central1
     context: bl-demeter
@@ -10,15 +13,13 @@ helmfile:
     version: 0.1.3
   image:
     repository: ghcr.io/yoroi-classic/cardano-wallet-backend
-    # Replace with the full commit tag reported by publish-image.
-    tag: sha-0000000000000000000000000000000000000000
+    # Full commit tag reported by publish-image.
+    tag: sha-08b8a34fdd96b95b7a89acc65ee9c7142bb5ba4f
   backendPort: 3010
   kong:
     namespace: kong
     ingressClass: kong
-    # Replace with the actual shared Kong proxy Service before enabling.
-    proxyService: replace-with-kong-proxy-service
-    # Confirm these labels against the existing Kong gateway pods.
+    proxyService: kong-gateway-proxy
     podSelector:
       app.kubernetes.io/name: gateway
       app.kubernetes.io/instance: kong

@@ -52,21 +52,14 @@ before deployment; this initial setup assumes public packages.
 
 PR validation runs on every pull request to `main`, so required checks are not
 skipped by path filters. It renders against the exact chart source commit recorded in
-`pr-helmfile.yml`, using the readable deployment settings in `config.yaml`, or the public example
-when those settings have not been added yet. It never decrypts production
-configuration or accesses the shared cluster. Update that source pin together
+`pr-helmfile.yml`, using the deployment settings in `values.yaml`. It never
+accesses the shared cluster. Update that source pin together
 with the OCI chart version. Credentialed diff/apply runs pull the OCI artifact.
 
 ## CI credentials and cluster access
 
-Deployment jobs run only from `main`. Configure these repository secrets and
-Actions variables:
-
-| Secret | Value |
-| --- | --- |
-| `SOPS_AGE_KEY` | The existing MorrowWallet CI age identity authorized for `config.yaml` |
-
-Add these repository Actions variables:
+Deployment jobs run only from `main` and need no repository secrets. Add these
+repository Actions variables:
 
 | Variable | Value |
 | --- | --- |
@@ -106,35 +99,18 @@ Confirm that the shared Kong access-log configuration preserves wallet privacy:
 request paths and query strings can contain wallet addresses. This application
 configuration does not change logging for other applications on the cluster.
 
-## Add settings through SOPS
+## Settings
 
-Production settings live only under `helmfile` in the repository-root
-`config.yaml`. The example is an onboarding/rendering fixture, not a second
-production configuration file. The existing authenticated file must be updated
-on a machine with an authorized age identity.
+Deployment settings live in plain `helmfile-app/values.yaml`; none of them are
+credentials. Edit it through a normal pull request. Merging a change to it on
+`main` deploys it: `run-helmfile` applies on every push to `main` that touches
+`helmfile-app/`, the deployment scripts, or these workflows. A credential-free
+job reads `helmfile.enabled` first and skips the deployment while it is false.
 
-From the repository root on that machine:
-
-```sh
-export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/morrowwallet-operator.txt"
-morrow_settings=$(mktemp)
-cp helmfile-app/config.yaml.example "$morrow_settings"
-$EDITOR "$morrow_settings"
-python3 scripts/configure-helmfile.py "$morrow_settings"
-rm -f "$morrow_settings"
-sops --decrypt config.yaml > /dev/null
-```
-
-Before running the helper, fill the GKE project and ACME contact email, replace
-the zero image tag with a successfully published commit tag, set the real
-`kong.proxyService` name and gateway pod selector, and confirm the
-proposed hostnames `api.morrowwallet.com` and `api-preprod.morrowwallet.com`.
-Keep the chart and image pins explicit. Set `helmfile.enabled: true` only after
-the CI credentials, packages, namespaces, and cluster permissions are
-ready. The helper sets only the `helmfile` section through SOPS, preserving the
-Terraform/Cloudflare settings and regenerating the file's integrity metadata.
-Commit the resulting `config.yaml` through a reviewed PR. Subsequent edits use
-`sops config.yaml`.
+Before enabling, set the ACME contact email and confirm the image tag is a
+published commit tag. Keep the chart and image pins explicit. Set
+`helmfile.enabled: true` only after the packages, deployer identity,
+namespaces, cluster permissions, and DNS records are ready.
 
 Both releases start with one replica and anonymous Koios access. Selecting
 Blockfrost requires an operator-managed Secret named by `existingSecret` in
@@ -144,11 +120,12 @@ shared rate-limit/cache behavior before increasing replicas.
 
 ## Diff, DNS, and apply
 
-1. Merge reviewed code and completed SOPS configuration. Run **Actions →
-   test-helmfile** on `main`, or **run-helmfile** with `arguments: diff`.
+1. Run **Actions → test-helmfile** on `main`, or **run-helmfile** with
+   `arguments: diff`.
    The prerequisite step reports
    the existing Kong load-balancer address.
-2. Add DNS records through `sops config.yaml` and the existing Terraform
+2. Add DNS records through `sops config.yaml` (the Terraform configuration
+   stays encrypted) and the existing Terraform
    plan/apply workflow. For an IPv4 load balancer, add these to the existing
    `cloudflare.zones[0].a_records` list, replacing the content with its address:
 
@@ -172,8 +149,8 @@ shared rate-limit/cache behavior before increasing replicas.
 3. Confirm both DNS names resolve to Kong before applying the Helmfile. HTTP-01
    validation requires public port 80 to reach Kong. The temporary ACME solver
    route handles its challenge path; the backend route redirects HTTP to HTTPS.
-4. Run **Actions → run-helmfile** on `main`, choose `arguments: apply`, review
-   the diff. Releases wait for readiness
+4. Merge the change setting `helmfile.enabled: true`; `run-helmfile` applies it.
+   **run-helmfile** with `arguments: apply` reruns it manually. Releases wait for readiness
    and roll back individually on Helm failure. The post-apply step waits for
    backend rollouts and certificate readiness, then verifies HTTPS health and the
    expected network/provider with a healthy chain status. HTTPS startup and
@@ -189,5 +166,5 @@ shared rate-limit/cache behavior before increasing replicas.
 
 All cluster deployment and DNS changes use their respective CI
 workflows. No live apply is performed by PR validation. To roll back, revert
-settings or image/chart pins through a reviewed PR and use the same diff/apply
-workflow; do not delete namespaces, TLS Secrets, or unrelated cluster releases.
+settings or image/chart pins through a PR; merging it deploys the previous
+version; do not delete namespaces, TLS Secrets, or unrelated cluster releases.

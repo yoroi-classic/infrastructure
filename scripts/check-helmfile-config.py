@@ -9,7 +9,7 @@ from helmfile_config import validate, write_github_env
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--deploy", action="store_true")
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="helmfile-app/values.yaml")
     parser.add_argument("--github-env")
     parser.add_argument("--authenticated-project")
     args = parser.parse_args()

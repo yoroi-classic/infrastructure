@@ -44,6 +44,6 @@ def verify(config):
 
 if __name__ == "__main__":
     try:
-        verify(yaml.safe_load(Path("config.yaml").read_text())["helmfile"])
+        verify(yaml.safe_load(Path("helmfile-app/values.yaml").read_text())["helmfile"])
     except (ValueError, RuntimeError) as error:
         raise SystemExit(str(error)) from error

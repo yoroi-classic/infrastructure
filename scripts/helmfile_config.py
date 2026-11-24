@@ -12,7 +12,7 @@ def require(condition, message):
 
 
 def validate(config, complete=False, require_enabled=False, authenticated_project=None):
-    require(isinstance(config, dict), "Add helmfile settings through SOPS; see helmfile-app/README.md")
+    require(isinstance(config, dict), "Add helmfile settings to helmfile-app/values.yaml")
     try:
         cluster = config["cluster"]
         require(cluster["context"] == "bl-demeter", "Only bl-demeter is supported")
