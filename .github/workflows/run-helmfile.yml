@@ -43,7 +43,8 @@ jobs:
 
   helmfile:
     needs: enabled
-    if: needs.enabled.outputs.enabled == 'true'
+    # Merges apply only while enabled; a dispatched diff previews while disabled.
+    if: needs.enabled.outputs.enabled == 'true' || (github.event_name == 'workflow_dispatch' && inputs.arguments == 'diff')
     permissions:
       contents: read
       id-token: write

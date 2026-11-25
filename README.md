@@ -166,5 +166,7 @@ All backend values come from `config.yaml`.
 [`helmfile-app`](helmfile-app/README.md) deploys the backend chart into the shared
 Blink Labs `bl-demeter` cluster. Kong terminates TLS; MorrowWallet DNS stays under
 this repository's Terraform configuration. Mainnet and preprod use separate
-namespaces. Deployment settings live in plain `helmfile-app/values.yaml`;
-merging a change to them on `main` deploys it.
+namespaces. Deployment settings live in plain `helmfile-app/values.yaml`.
+While `helmfile.enabled` is true, merging a change under `helmfile-app/` or to
+the deployment workflows on `main` deploys it; see
+[Settings](helmfile-app/README.md#settings).

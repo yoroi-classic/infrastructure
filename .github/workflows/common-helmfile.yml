@@ -35,7 +35,9 @@ jobs:
         run: |
           case "$OPERATION" in diff|apply) ;; *) exit 1 ;; esac
       - name: Prepare deployment configuration
-        run: python3 scripts/check-helmfile-config.py --deploy --github-env "$GITHUB_ENV"
+        env:
+          OPERATION: ${{ inputs.arguments }}
+        run: python3 scripts/check-helmfile-config.py --deploy --operation "$OPERATION" --github-env "$GITHUB_ENV"
       - name: Install kubectl
         uses: azure/setup-kubectl@0c5e050edfed71b2b50731ab044d42489d51c129 # v4.0.0
         with:
@@ -55,8 +57,9 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
       - name: Verify the authenticated deployment project
         env:
+          OPERATION: ${{ inputs.arguments }}
           AUTHENTICATED_PROJECT: ${{ steps.auth.outputs.project_id }}
-        run: python3 scripts/check-helmfile-config.py --deploy --authenticated-project "$AUTHENTICATED_PROJECT"
+        run: python3 scripts/check-helmfile-config.py --deploy --operation "$OPERATION" --authenticated-project "$AUTHENTICATED_PROJECT"
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:

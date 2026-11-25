@@ -301,6 +301,12 @@ class DeploymentGuards(unittest.TestCase):
             result = self.run_cli(ready(), "--authenticated-project", "another-project")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("authenticated deployment identity", result.stderr)
+        disabled = ready()
+        disabled["enabled"] = False
+        for options, allowed in (((), False), (("--operation", "apply"), False), (("--operation", "diff"), True)):
+            with self.subTest(options=options):
+                result = self.run_cli(disabled, *options)
+                self.assertEqual(result.returncode == 0, allowed, result.stderr)
         config = ready()
         del config["chart"]["version"]
         result = self.run_cli(config)
@@ -415,27 +421,33 @@ class DeploymentWorkflow(unittest.TestCase):
                              {"contents": "read", "id-token": "write"})
             self.assertNotIn("secrets", caller["jobs"]["helmfile"])
 
-    def test_each_deployment_config_step_rejects_disabled_deployments(self):
+    def test_disabled_deployments_allow_diff_and_reject_apply(self):
         for step_name in ("Prepare deployment configuration", "Verify the authenticated deployment project"):
             step = self.steps[step_name]
             self.assertIsNone(step.get("if"))
             self.assertFalse(step.get("continue-on-error", False))
+            self.assertEqual(step["env"]["OPERATION"], "${{ inputs.arguments }}")
             credential_step = "GKE authentication" if step_name == "Prepare deployment configuration" else "Get bl-demeter credentials"
             self.assertLess(self.order.index(step_name), self.order.index(credential_step))
-            with self.subTest(step=step_name), tempfile.TemporaryDirectory() as name:
-                directory = Path(name)
-                (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
-                config = ready()
-                config["enabled"] = False
-                write_values(directory, config)
-                result = self.run_step(
-                    step,
-                    directory,
-                    GITHUB_ENV=str(directory / "github-env"),
-                    AUTHENTICATED_PROJECT="test-deployment-project",
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Enable Helmfile only after setup is complete", result.stderr)
+            for operation, allowed in (("apply", False), ("diff", True)):
+                with self.subTest(step=step_name, operation=operation), tempfile.TemporaryDirectory() as name:
+                    directory = Path(name)
+                    (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+                    config = ready()
+                    config["enabled"] = False
+                    write_values(directory, config)
+                    result = self.run_step(
+                        step,
+                        directory,
+                        OPERATION=operation,
+                        GITHUB_ENV=str(directory / "github-env"),
+                        AUTHENTICATED_PROJECT="test-deployment-project",
+                    )
+                    if allowed:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("Enable Helmfile only after setup is complete", result.stderr)
 
     def run_step(self, step, directory, **values):
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
@@ -518,7 +530,7 @@ elif 'pods' in args and 'get' in args:
                 (directory / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
                 write_values(directory, ready())
                 result = self.run_step(step, directory, AUTHENTICATED_PROJECT=authenticated,
-                                       GKE_PROJECT="test-deployment-project")
+                                       OPERATION="apply", GKE_PROJECT="test-deployment-project")
                 if expected == 0:
                     self.assertEqual(result.returncode, 0, result.stderr)
                 else:
@@ -543,7 +555,9 @@ class DeployOnMerge(unittest.TestCase):
         self.assertNotIn("permissions", gate)
         self.assertNotIn("secrets", gate)
         self.assertEqual(self.workflow["jobs"]["helmfile"]["needs"], "enabled")
-        self.assertEqual(self.workflow["jobs"]["helmfile"]["if"], "needs.enabled.outputs.enabled == 'true'")
+        self.assertEqual(self.workflow["jobs"]["helmfile"]["if"],
+                         "needs.enabled.outputs.enabled == 'true' || "
+                         "(github.event_name == 'workflow_dispatch' && inputs.arguments == 'diff')")
         step = next(s for s in gate["steps"] if s.get("id") == "check")
         for enabled, expected in ((True, "enabled=true"), (False, "enabled=false"), ("yes", "enabled=false")):
             with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as name:
@@ -557,6 +571,13 @@ class DeployOnMerge(unittest.TestCase):
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(output.read_text().strip(), expected)
+
+    def test_applies_are_serialized_and_never_cancelled(self):
+        common = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
+        self.assertEqual(common["concurrency"],
+                         {"group": "morrowwallet-helmfile-bl-demeter", "cancel-in-progress": False})
+        for job in common["jobs"].values():
+            self.assertNotIn("concurrency", job)
 
     def test_no_approval_environment_or_decryption_key(self):
         for filename in ("common-helmfile.yml", "run-helmfile.yml", "test-helmfile.yml", "pr-helmfile.yml"):
