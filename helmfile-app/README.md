@@ -13,23 +13,26 @@ The application and ACME solver ingresses explicitly opt out of external-dns.
 The small `morrowwallet-policy` chart supplies the HTTP-01 Issuer and a
 NetworkPolicy admitting backend traffic only from the configured gateway pods
 in the `kong` namespace. Confirm `kong.podSelector` against the existing gateway
-labels; CI requires matching ready pods. The cluster must enforce NetworkPolicies.
+labels; CI requires matching ready pods. bl-demeter does not currently enforce
+NetworkPolicies, so the policy takes effect only once enforcement is enabled.
 `backendPort` sets both the application port and the policy port (3010 for the
 pinned chart).
 
 The backend uses explicit `single-hop` proxy trust: only Kong's appended client
 address owns the rate-limit bucket; earlier client-supplied entries are ignored,
 even for private client addresses. This requires the published image to include
-single-hop support from backend PR #262. NetworkPolicy enforcement must restrict
-all backend ingress to the selected gateway pods. Kong must append the real
-client address and must not trust arbitrary incoming forwarding headers.
+single-hop support from backend PR #262. Kong must append the real client
+address and must not trust arbitrary incoming forwarding headers. Without
+NetworkPolicy enforcement, other pods in the cluster can reach the backend
+directly and choose their rate-limit bucket with a forged forwarding header;
+internet traffic still passes through Kong. This in-cluster risk is accepted.
 
 CI requires the Kong proxy LoadBalancer Service to use
 `externalTrafficPolicy: Local`, preserving client addresses rather than sharing
 a node's rate-limit bucket. Set `kong.proxyService` to the actual proxy Service.
 If the shared service needs changing, do so through its owning infrastructure
 review/apply workflow before deploying this application. Confirm Kong's trusted-IP
-configuration and NetworkPolicy enforcement as part of setup. Set
+configuration as part of setup. Set
 `gateway.env.trusted_ips: "127.0.0.1,::1"` in the shared Kong Helm values so a
 concrete environment value overrides any config file. CI requires this literal
 override on every matched gateway, the official Kong image and default entrypoint,
@@ -71,9 +74,7 @@ or store a service-account JSON key. Configure the provider to trust this
 repository's `refs/heads/main` workflow identity and allow it to impersonate the
 designated deployer service account. The workflow fails before authentication
 if either variable is unset. The identity needs GKE cluster discovery access
-(`roles/container.clusterViewer`). Before checking Kong, CI reads the cluster's
-network configuration and requires enabled NetworkPolicy enforcement or GKE
-Dataplane V2. The identity also needs Kubernetes permissions to manage Helm
+(`roles/container.clusterViewer`). The identity also needs Kubernetes permissions to manage Helm
 releases and their Deployments, Services, ServiceAccounts, ConfigMaps, Ingresses,
 NetworkPolicies, and cert-manager Issuers/Certificates in `morrowwallet-mainnet`
 and `morrowwallet-preprod`. CI sets `HELM_DRIVER=configmap`, so release state

@@ -71,10 +71,6 @@ jobs:
           context_name: ${{ env.GKE_CONTEXT }}
       - name: Verify shared ingress prerequisites
         run: |
-          gcloud container clusters describe "$GKE_NAME" --project "$GKE_PROJECT" --location "$GKE_LOCATION" --format=json |
-            jq -e 'if .networkPolicy.enabled == true or .networkConfig.datapathProvider == "ADVANCED_DATAPATH" then
-              "NetworkPolicy enforcement verified"
-              else error("Backend single-hop proxy trust requires GKE NetworkPolicy enforcement") end'
           kubectl --context "$GKE_CONTEXT" get ingressclass kong
           kubectl --context "$GKE_CONTEXT" get crd issuers.cert-manager.io
           kubectl --context "$GKE_CONTEXT" --namespace kong get service "$KONG_PROXY_SERVICE" -o json |
