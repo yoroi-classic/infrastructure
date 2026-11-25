@@ -575,9 +575,18 @@ class DeployOnMerge(unittest.TestCase):
     def test_applies_are_serialized_and_never_cancelled(self):
         common = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
         self.assertEqual(common["concurrency"],
-                         {"group": "morrowwallet-helmfile-bl-demeter", "cancel-in-progress": False})
+                         {"group": "morrowwallet-helmfile-bl-demeter", "cancel-in-progress": False,
+                          "queue": "max"})
         for job in common["jobs"].values():
             self.assertNotIn("concurrency", job)
+
+    def test_each_run_deploys_the_current_tip_of_main(self):
+        common = yaml.safe_load((ROOT / ".github/workflows/common-helmfile.yml").read_text())
+        job = common["jobs"]["helmfile"]
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+        checkout = job["steps"][0]
+        self.assertTrue(checkout["uses"].startswith("actions/checkout@"))
+        self.assertEqual(checkout["with"]["ref"], "refs/heads/main")
 
     def test_no_approval_environment_or_decryption_key(self):
         for filename in ("common-helmfile.yml", "run-helmfile.yml", "test-helmfile.yml", "pr-helmfile.yml"):

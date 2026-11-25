@@ -107,8 +107,9 @@ credentials. Edit it through a normal pull request. Merging a change to it on
 `main` deploys it: `run-helmfile` applies on every push to `main` that touches
 `helmfile-app/`, the deployment scripts, or these workflows. A credential-free
 job reads `helmfile.enabled` first and skips the deployment while it is false.
-Concurrent runs queue in one group and are never cancelled, so two quick merges
-apply in order.
+Runs wait in one queue (up to 100) and are never cancelled. Each run deploys
+the current tip of `main`, not the commit that triggered it, so the last run
+always deploys the newest merge even if runs start out of order.
 
 While `helmfile.enabled` is false, a manually dispatched `diff` still runs, so
 the first apply can be previewed. Merges and dispatched `apply` stay off.
@@ -128,7 +129,8 @@ shared rate-limit/cache behavior before increasing replicas.
 
 1. With `helmfile.enabled: false`, merge the ACME contact email and the
    published image tag; nothing deploys. Then run **Actions → run-helmfile**
-   with `arguments: diff` (or **test-helmfile**). It runs while disabled,
+   on the `main` branch with `arguments: diff` (or **test-helmfile** on
+   `main`); other branches skip the job. It runs while disabled,
    previews the first apply, and its prerequisite step reports the existing
    Kong load-balancer address.
 2. Add DNS records through `sops config.yaml` (the Terraform configuration
