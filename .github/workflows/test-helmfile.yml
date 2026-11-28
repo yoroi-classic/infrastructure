@@ -1,0 +1,16 @@
+name: test-helmfile
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  helmfile:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/common-helmfile.yml
+    with:
+      arguments: diff

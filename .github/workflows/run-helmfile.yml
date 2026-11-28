@@ -1,0 +1,53 @@
+name: run-helmfile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - helmfile-app/**
+      - scripts/*helmfile*.py
+      - scripts/check-kong.py
+      - .github/workflows/*-helmfile.yml
+  workflow_dispatch:
+    inputs:
+      arguments:
+        description: Helmfile operation on bl-demeter
+        required: true
+        type: choice
+        default: diff
+        options:
+          - diff
+          - apply
+
+permissions:
+  contents: read
+
+jobs:
+  enabled:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Read the deployment switch
+        id: check
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          import yaml
+          enabled = yaml.safe_load(Path("helmfile-app/values.yaml").read_text())["helmfile"]["enabled"]
+          print("enabled=" + ("true" if enabled is True else "false"))
+          PYTHON
+
+  helmfile:
+    needs: enabled
+    # Merges apply only while enabled; a dispatched diff previews while disabled.
+    if: needs.enabled.outputs.enabled == 'true' || (github.event_name == 'workflow_dispatch' && inputs.arguments == 'diff')
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/common-helmfile.yml
+    with:
+      arguments: ${{ github.event_name == 'push' && 'apply' || inputs.arguments }}

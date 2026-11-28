@@ -1,0 +1,48 @@
+helmfile:
+  # Merging a change to this file on main deploys it. Keep false until the
+  # backend image is published, the deployer identity accepts main, and the
+  # API DNS records resolve to Kong.
+  enabled: false
+  cluster:
+    project: blinklabs-demeter
+    name: dmtr-cluster
+    location: us-central1
+    context: bl-demeter
+  chart:
+    source: oci://ghcr.io/yoroi-classic/charts/cardano-wallet-backend
+    version: 0.1.3
+  image:
+    repository: ghcr.io/yoroi-classic/cardano-wallet-backend
+    # Full commit tag reported by publish-image.
+    tag: sha-08b8a34fdd96b95b7a89acc65ee9c7142bb5ba4f
+  backendPort: 3010
+  kong:
+    namespace: kong
+    ingressClass: kong
+    proxyService: kong-gateway-proxy
+    podSelector:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/instance: kong
+  acme:
+    email: support@blinklabs.io
+    server: https://acme-v02.api.letsencrypt.org/directory
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  deployments:
+    mainnet:
+      namespace: morrowwallet-mainnet
+      hostname: api.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''
+    preprod:
+      namespace: morrowwallet-preprod
+      hostname: api-preprod.morrowwallet.com
+      replicas: 1
+      provider: koios
+      existingSecret: ''
