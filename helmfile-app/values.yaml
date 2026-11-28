@@ -24,7 +24,7 @@ helmfile:
       app.kubernetes.io/name: gateway
       app.kubernetes.io/instance: kong
   acme:
-    email: REPLACE_WITH_ACME_EMAIL
+    email: support@blinklabs.io
     server: https://acme-v02.api.letsencrypt.org/directory
   resources:
     requests:
